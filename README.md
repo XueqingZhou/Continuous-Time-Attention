@@ -47,7 +47,7 @@ For WikiText-103 language modeling, PDE-Transformer achieves perplexity of **1.0
 ```bash
 # Clone the repository
 git clone https://github.com/XueqingZhou/Continuous-Time-Attention.git
-cd Continuous-Time-Attention/src_clean
+cd Continuous-Time-Attention/src
 
 # Install dependencies
 pip install -r requirements.txt
