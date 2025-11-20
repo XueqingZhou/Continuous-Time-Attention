@@ -1,0 +1,35 @@
+# Configuration for WikiText-103 Language Modeling (Tables 3-5)
+
+dataset:
+  name: "wikitext-103-v1"
+  max_length: 512
+  train_sample_size: null  # Use all data
+  val_sample_size: null
+  cache_dir: null
+
+tokenizer:
+  path: "./tokenizer/bert-base-uncased"
+
+model:
+  embed_dim: 128
+  num_heads: 4
+  hidden_dim: 256
+  num_layers: 2  # Longformer-style shallow architecture
+  dropout: 0.1
+  
+pde:
+  type: "diffusion"
+  steps: 4  # Table 4 shows 4 PDE steps is optimal
+
+training:
+  batch_size: 16
+  num_epochs: 20
+  learning_rate: 1e-4
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  num_workers: 0
+  seed: 42
+
+output:
+  dir: "results"
+

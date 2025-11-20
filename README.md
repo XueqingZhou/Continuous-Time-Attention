@@ -2,45 +2,269 @@
 
 [![EMNLP 2025](https://img.shields.io/badge/EMNLP-2025-blue.svg)](https://2025.emnlp.org/)
 [![arXiv](https://img.shields.io/badge/arXiv-2505.20666-b31b1b.svg)](https://arxiv.org/abs/2505.20666)
-[![GitHub](https://img.shields.io/badge/GitHub-Code-blue.svg)](https://github.com/XueqingZhou/Continuous-Time-Attention)
 [![Paper](https://img.shields.io/badge/Paper-PDF-red.svg)](https://aclanthology.org/2025.emnlp-main.1097.pdf)
 
-Official implementation of **Continuous-Time Attention**, a PDE-guided formulation of self-attention that treats token interactions as trajectories of a continuous-time dynamical system governed by partial differential equations.
+Official PyTorch implementation of **Continuous-Time Attention**, a PDE-guided formulation of self-attention that treats token interactions as trajectories of a continuous-time dynamical system governed by partial differential equations.
 
-## Overview
+## 🌟 Overview
 
-Transformers achieve state-of-the-art performance on a wide range of sequence modeling tasks, but their quadratic attention complexity and discrete-layer parameterization make long-sequence modeling both expensive and difficult to analyze. 
+Continuous-Time Attention addresses the challenges of long-sequence modeling in Transformers by:
 
-**Continuous-Time Attention** addresses these challenges by:
+- 🔄 **PDE-Guided Dynamics**: Models token interactions as solutions of partial differential equations (PDEs) in continuous time
+- 📈 **Improved Stability**: Better gradient flow and training stability for long-range dependencies  
+- ⚡ **Efficient Computation**: Favorable computational properties for long sequences
+- 🎯 **Strong Performance**: Consistent improvements across classification and language modeling tasks
 
-- Modeling token interactions as solutions of partial differential equations (PDEs) in continuous time
-- Enabling efficient and stable modeling of long-range dependencies in Transformers
-- Providing better control over information propagation
-- Improving stability for long-range dependencies
-- Offering favorable computational properties for long sequences
+## 📊 Key Results
 
-This framework allows us to derive new attention mechanisms with a principled lens on how information flows across depth and positions.
+| **Task** | **Standard Transformer** | **PDE-Transformer** | **Improvement** |
+|----------|-------------------------|---------------------|----------------|
+| IMDb | 59.4% | **62.4%** | +3.0% |
+| AG News | 60.5% | **72.1%** | +11.6% |
+| SST-2 | 56.6% | **76.3%** | +19.7% |
+| IMDb (Char-level, LRA) | 64.68% | **65.44%** | +1.17% |
 
-## Links
+For WikiText-103 language modeling, PDE-Transformer achieves perplexity of **1.02** compared to Standard Longformer's **1.04** 
 
-- **Paper**: [arXiv:2505.20666](https://arxiv.org/abs/2505.20666)
-- **PDF**: [ACL Anthology](https://aclanthology.org/2025.emnlp-main.1097.pdf)
-- **Code**: [GitHub Repository](https://github.com/XueqingZhou/Continuous-Time-Attention) (Coming Soon)
-- **Project Page**: [https://xueqingzhou.github.io/Continuous-Time-Attention/](https://xueqingzhou.github.io/Continuous-Time-Attention/)
+### Ablation Study Results
 
-## Citation
+**Table: PDE Steps** - Optimal configuration uses **4 PDE steps**:
+- 1 step: PPL = 3.49 (99.97% reduction)
+- 2 steps: PPL = 3.42 (99.97% reduction)  
+- **4 steps: PPL = 3.36** (99.97% reduction) ✓ **Best**
+- 8 steps: Training becomes unstable
+
+**Table: PDE Types** - All PDE variants achieve ~99.98% improvement:
+- Diffusion (α=0.10): PPL = 2.15
+- Wave (α=0.15): PPL = 2.27
+- Reaction-Diffusion (α=0.10, β=0.02): PPL = 2.15
+- Advection-Diffusion (α=0.10, β=0.03): PPL = 2.18
+
+## 🚀 Quick Start
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/XueqingZhou/Continuous-Time-Attention.git
+cd Continuous-Time-Attention/src_clean
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### Download Tokenizer
+
+You'll need to download a pre-trained tokenizer (e.g., BERT tokenizer):
+
+```python
+from transformers import BertTokenizer
+
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+tokenizer.save_pretrained('./tokenizer/bert-base-uncased')
+```
+
+### Run Experiments
+
+#### 1. Classification Tasks (Table 1: IMDb, AG News, SST-2)
+
+```bash
+# IMDb
+python experiments/run_classification.py \
+    --dataset imdb \
+    --tokenizer_path ./tokenizer/bert-base-uncased \
+    --max_length 256 \
+    --embed_dim 128 \
+    --num_heads 4 \
+    --hidden_dim 256 \
+    --num_layers 2 \
+    --pde_type diffusion \
+    --pde_steps 1 \
+    --batch_size 64 \
+    --num_epochs 5 \
+    --learning_rate 1e-4 \
+    --output_dir results
+
+# AG News
+python experiments/run_classification.py \
+    --dataset ag_news \
+    --tokenizer_path ./tokenizer/bert-base-uncased \
+    --max_length 256 \
+    --batch_size 64 \
+    --num_epochs 5 \
+    --output_dir results
+
+# SST-2
+python experiments/run_classification.py \
+    --dataset sst2 \
+    --tokenizer_path ./tokenizer/bert-base-uncased \
+    --max_length 128 \
+    --batch_size 512 \
+    --num_epochs 2 \
+    --output_dir results
+```
+
+#### 2. Character-Level IMDb (Table 2: Long Range Arena)
+
+```bash
+python experiments/run_char_level.py \
+    --max_length 2048 \
+    --embed_dim 256 \
+    --num_heads 4 \
+    --hidden_dim 1024 \
+    --num_layers 4 \
+    --pde_type diffusion \
+    --pde_steps 1 \
+    --batch_size 16 \
+    --num_epochs 10 \
+    --learning_rate 1e-4 \
+    --output_dir results
+```
+
+#### 3. WikiText-103 Language Modeling (Tables 3-5)
+
+```bash
+python experiments/run_language_modeling.py \
+    --tokenizer_path ./tokenizer/bert-base-uncased \
+    --max_length 512 \
+    --embed_dim 128 \
+    --num_heads 4 \
+    --hidden_dim 256 \
+    --num_layers 2 \
+    --pde_type diffusion \
+    --pde_steps 4 \
+    --batch_size 16 \
+    --num_epochs 20 \
+    --learning_rate 1e-4 \
+    --output_dir results
+```
+
+### Ablation Studies
+
+Run ablation studies to reproduce Tables 4 and 5:
+
+#### Data Size Ablation
+
+```bash
+python experiments/run_ablation_datasize.py \
+    --tokenizer_path ./tokenizer/bert-base-uncased \
+    --data_sizes 0.001 0.01 0.05 0.1 \
+    --batch_size 128 \
+    --num_epochs 10 \
+    --output_dir results/ablation
+```
+
+#### PDE Steps Ablation (Table 4)
+
+```bash
+python experiments/run_ablation_pdesteps.py \
+    --tokenizer_path ./tokenizer/bert-base-uncased \
+    --pde_steps_list 0 1 2 4 8 \
+    --batch_size 128 \
+    --num_epochs 20 \
+    --output_dir results/ablation
+```
+
+#### PDE Type Ablation (Table 5)
+
+```bash
+python experiments/run_ablation_pdetype.py \
+    --tokenizer_path ./tokenizer/bert-base-uncased \
+    --pde_types diffusion wave reaction-diffusion advection-diffusion \
+    --pde_steps 4 \
+    --batch_size 128 \
+    --num_epochs 20 \
+    --output_dir results/ablation
+```
+
+#### Run All Ablations
+
+```bash
+bash scripts/run_all_ablations.sh
+```
+
+## 📁 Project Structure
+
+```
+src/
+├── models/
+│   ├── __init__.py
+│   ├── pde_layers.py              # PDE refinement layers
+│   └── transformers.py            # PDE-enhanced Transformer models
+├── data/
+│   ├── __init__.py
+│   ├── classification.py          # Data loading for classification
+│   ├── language_modeling.py       # Data loading for language modeling
+│   └── char_level.py              # Character-level data preparation
+├── trainers/
+│   ├── __init__.py
+│   ├── classification_trainer.py
+│   └── lm_trainer.py
+├── experiments/
+│   ├── run_classification.py      # Table 1 experiments
+│   ├── run_char_level.py          # Table 2 experiments
+│   ├── run_language_modeling.py   # Tables 3-5 experiments
+│   ├── run_ablation_datasize.py   # Data size ablation
+│   ├── run_ablation_pdesteps.py   # PDE steps ablation (Table 4)
+│   └── run_ablation_pdetype.py    # PDE type ablation (Table 5)
+├── configs/
+│   ├── imdb.yaml
+│   ├── char_level_imdb.yaml
+│   └── wikitext103.yaml
+├── scripts/
+│   ├── prepare_tokenizer.sh
+│   ├── run_all_experiments.sh
+│   └── run_all_ablations.sh       # Run all ablation studies
+├── requirements.txt
+└── README.md
+```
+
+## 🔬 PDE Types
+
+The framework supports multiple PDE variants:
+
+1. **Diffusion**: `--pde_type diffusion`
+   - Models smooth information propagation: `du/dt = α∇²u`
+   
+2. **Wave**: `--pde_type wave`
+   - Models oscillatory dynamics: `d²u/dt² = c²∇²u`
+   
+3. **Reaction-Diffusion**: `--pde_type reaction-diffusion`
+   - Combines diffusion with nonlinear reactions: `du/dt = α∇²u + βf(u)`
+   
+4. **Advection-Diffusion**: `--pde_type advection-diffusion`
+   - Adds directional flow: `du/dt = α∇²u + β∇u`
+
+## 🎯 Hyperparameters
+
+### Classification Tasks
+- Embedding dimension: 128
+- Number of heads: 4
+- FFN hidden dimension: 256
+- Number of layers: 2
+- PDE steps: 1
+- Learning rate: 1e-4
+
+### Character-Level (LRA)
+- Embedding dimension: 256
+- Number of layers: 4
+- FFN hidden dimension: 1024
+- Sequence length: 2048
+- PDE steps: 1
+
+### Language Modeling
+- Sequence length: 512
+- PDE steps: 4 (optimal based on Table 4)
+- Number of layers: 2 (Longformer-style)
+
+## 📝 Citation
 
 If you find this work useful, please cite:
 
 ```bibtex
 @inproceedings{zhang-zhou-2025-continuous,
   title = {Continuous-Time Attention: {PDE}-Guided Mechanisms for Long-Sequence Transformers},
-  author = {Zhang, Yukun and
-    Zhou, Xueqing},
-  editor = {Christodoulopoulos, Christos and
-    Chakraborty, Tanmoy and
-    Rose, Carolyn and
-    Peng, Violet},
+  author = {Zhang, Yukun and Zhou, Xueqing},
   booktitle = {Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing},
   month = nov,
   year = {2025},
@@ -48,26 +272,42 @@ If you find this work useful, please cite:
   publisher = {Association for Computational Linguistics},
   url = {https://aclanthology.org/2025.emnlp-main.1097/},
   doi = {10.18653/v1/2025.emnlp-main.1097},
-  pages = {21654--21674},
-  ISBN = {979-8-89176-332-6}
+  pages = {21654--21674}
 }
 ```
 
-## Authors
+## 👥 Authors
 
 - **Yukun Zhang**<sup>*</sup> - The Chinese University of Hong Kong
 - **Xueqing Zhou**<sup>*</sup> - Fudan University
 
 <sup>*</sup>Equal contribution
 
-## Abstract
+## 📄 License
 
-Transformers achieve state-of-the-art performance on a wide range of sequence modeling tasks, but their quadratic attention complexity and discrete-layer parameterization make long-sequence modeling both expensive and difficult to analyze. We propose **Continuous-Time Attention**, a PDE-guided formulation of self-attention that treats token interactions as trajectories of a continuous-time dynamical system governed by partial differential equations. This view allows us to derive new attention mechanisms with better control over information propagation, improved stability for long-range dependencies, and favorable computational properties for long sequences. We instantiate our framework in several long-sequence benchmarks, where Continuous-Time Attention attains competitive or superior performance to strong Transformer baselines while offering a principled lens on how information flows across depth and positions.
+This project is licensed under the terms specified in the LICENSE file.
 
-## License
+## 🔗 Links
 
-This project is licensed under the terms specified in the repository.
+- **Paper**: [ACL Anthology](https://aclanthology.org/2025.emnlp-main.1097.pdf)
+- **arXiv**: [2505.20666](https://arxiv.org/abs/2505.20666)
+- **Project Page**: [https://xueqingzhou.github.io/Continuous-Time-Attention/](https://xueqingzhou.github.io/Continuous-Time-Attention/)
 
-## Acknowledgments
+## 🙏 Acknowledgments
 
-This template was borrowed from [Academic Project Page Template](https://github.com/eliahuhorwitz/Academic-project-page-template) which was adopted from the [Nerfies](https://nerfies.github.io) project page under a [Creative Commons Attribution-ShareAlike 4.0 International License](http://creativecommons.org/licenses/by-sa/4.0/).
+This project template was inspired by the [Academic Project Page Template](https://github.com/eliahuhorwitz/Academic-project-page-template).
+
+## ❓ FAQ
+
+**Q: What's the difference between this and standard Transformers?**
+A: We add PDE refinement layers after each Transformer layer to model continuous-time token interactions, improving long-range dependency modeling.
+
+**Q: How do I choose the PDE type?**
+A: For most tasks, `diffusion` works well. See Table 5 in the paper for comparisons across PDE variants.
+
+**Q: What about computational cost?**
+A: PDE layers add minimal overhead (~10%) while providing consistent accuracy improvements.
+
+**Q: Can I use this with pre-trained models?**
+A: Yes! You can integrate PDE layers into existing Transformer architectures. See the `models/transformers.py` for examples.
+
