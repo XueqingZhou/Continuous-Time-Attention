@@ -114,7 +114,7 @@
 <section class="hero teaser">
   <div class="container is-max-desktop">
     <div class="hero-body">
-      <img src="assets/images/teaser.png" alt="Teaser"/>
+      <img src="assets/images/架构图.png" alt="Architecture"/>
       <h2 class="subtitle has-text-centered">
         Continuous-Time Attention models token interactions as solutions of partial differential equations (PDEs) in continuous time,
         enabling efficient and stable modeling of long-range dependencies in Transformers.
@@ -171,54 +171,39 @@
     <div class="container">
       <div id="results-carousel" class="carousel results-carousel">
        <div class="item">
-        <!-- Your image here -->
-        <img src="assets/images/homonym_explain.png" alt="Homonyms Explanation"/>
+        <!-- Figure 6: Character-level IMDb results -->
+        <img src="assets/images/6.png" alt="Figure 6: Character-level IMDb results"/>
         <h2 class="subtitle has-text-centered">
-          Homonyms. We see that the word "baseball" provides the required synergistic context with the homonym "bat" to pick the 
-          sports setting over the animal. This effect can be confirmed in the synergy maps and image-level synergy values (S) as 
-          well where we observe a high synergy for "bat" with "baseball" compared to other words such as "He" and "swung".
+          <b>Figure 6:</b> Character-level IMDb results showing training/validation loss and validation accuracy across epochs. 
+          Continuous-Time Attention demonstrates improved training stability and better validation performance compared to baseline models.
         </h2>
       </div>
       <div class="item">
-        <!-- Your image here -->
-        <img src="assets/images/homonym_result.png" alt="Homonyms Result"/>
+        <!-- Figure 7: PDE-Longformer vs vanilla Longformer -->
+        <img src="assets/images/7.png" alt="Figure 7: PDE-Longformer vs vanilla Longformer"/>
         <h2 class="subtitle has-text-centered">
-          Homonyms. Left: Successful generation of homonym "bowl" in different contexts due to high synergy with modifiers "bowl" 
-          and "game". Right: Failure case where the model generates the homonym "mole" with the same semantic meaning, the animal, 
-          due to its failure to use contextual information from words like "coworker" as can be seen in the synergy map.
+          <b>Figure 7:</b> Comparison between PDE-Longformer and vanilla Longformer on WikiText-103 dataset. 
+          Left: Training/validation loss over 20 epochs. Right: Perplexity trend (lower is better). 
+          PDE-Longformer shows superior performance with more stable training dynamics.
         </h2>
       </div>
       <div class="item">
-        <!-- Your image here -->
-        <img src="assets/images/synonym_result.png" alt="Synonyms Results"/>
+        <!-- Figure 11: Sequence Length Impact -->
+        <img src="assets/images/11.png" alt="Figure 11: Analysis of Sequence Length Impact"/>
         <h2 class="subtitle has-text-centered">
-          Synonyms. Our redundancy map is able to highlight that the model considers the pairs "bed" and "mattress" (left) and "cube" 
-          and "cuboid" (right) as semantically similar
+          <b>Figure 11:</b> Analysis of sequence length impact on model performance. 
+          Continuous-Time Attention maintains consistent performance improvements across different sequence lengths, 
+          demonstrating its effectiveness for long-sequence modeling tasks.
        </h2>
      </div>
      <div class="item">
-      <!-- Your image here -->
-      <img src="assets/images/hypo_result_coco.png" alt="Co-Hyponyms Results"/>
+      <!-- Figure 12: Training dynamics under corrected setup -->
+      <img src="assets/images/12.png" alt="Figure 12: Training dynamics and performance"/>
       <h2 class="subtitle has-text-centered">
-        COCO Co-Hyponyms. The redundancy map proves to be very useful in finding out the reason behind the model’s failures in these figures. 
-        It confuses the co-hyponym pairs ("sandwich", "pizza")(left) and ("elephant", "cat")(right) to have the same meaning for the co-hyponyms 
-        as seen from the redundancy maps, which results in erroneous generations
-      </h2>
-    </div>
-     <div class="item">
-      <!-- Your image here -->
-      <img src="assets/images/p_intervention_r1.png" alt="Prompt Intervention Results"/>
-      <h2 class="subtitle has-text-centered">
-        Prompt Intervention. The redundancy is highly activated in the face region of the giraffe. On a closer look, we see that the face is that 
-        of a cow meaning that the word "cow" is redundant. This is confirmed as the image changes very little on omitting it from the prompt.
-      </h2>
-    </div>
-     <div class="item">
-      <!-- Your image here -->
-      <img src="assets/images/uniqueness_mrf_new.png" alt="Uniqueness Results"/>
-      <h2 class="subtitle has-text-centered">
-        Most Representative Features. Left: The "toothbrush" uniqueness map correctly captures the toothbrush bristles, their most distinct feature. 
-        Right: The "bear" uniqueness map correctly captures the bear region, specifically the face.
+        <b>Figure 12:</b> Training dynamics and performance under the corrected setup. 
+        Top-left: Training loss per batch (first 3 epochs). Top-right: Gradient norm evolution (first epoch, log-scale). 
+        Bottom-left: Validation loss vs. epoch. Bottom-right: Perplexity vs. epoch. 
+        PDE-1 Step exhibits stable gradients and improved validation/perplexity versus the standard Transformer.
       </h2>
     </div>
   </div>
