@@ -6,6 +6,78 @@
 
 Official PyTorch implementation of **Continuous-Time Attention**, a PDE-guided formulation of self-attention that treats token interactions as trajectories of a continuous-time dynamical system governed by partial differential equations.
 
+## System Pitch (Inference/Serving)
+
+From a systems perspective, **Continuous-Time Attention (CTA)** can be viewed as a **local stencil token-mixing operator** (e.g., diffusion Laplacian) that refines token features across a pseudo-time axis. Each PDE refinement step is **\(O(L)\)** in sequence length and is **kernel-friendly** (regular memory access, fusable multi-step updates), making it a natural building block for **long-context prefill** pipelines.
+
+This repo provides:
+
+- **Research baseline**: PDE refinement layers integrated into Transformer blocks (`src/models/transformers.py`).
+- **Systems evidence (this branch of work)**: microbenchmarks, profiling, and a Triton kernel stub to quantify/optimize **latency & memory scaling** for long sequences.
+
+## System Efficiency (Prefill)
+
+The following plots are generated from the scripts under `benchmarks/` (synthetic inputs, forward-only). They are meant to answer the serving question: **how does latency / peak memory scale with sequence length?**
+
+- **Latency vs Sequence Length**
+  - Output: `assets/images/system_latency_vs_seqlen.png`
+- **Peak Memory vs Sequence Length**
+  - Output: `assets/images/system_mem_vs_seqlen.png`
+
+Generate (GPU recommended):
+
+```bash
+pip install -r src/requirements.txt
+
+# From repo root
+python benchmarks/bench_block.py --device cuda --out_dir results/bench
+python benchmarks/plot_system_efficiency.py --in_dir results/bench --out_dir assets/images
+```
+
+## Microbenchmark
+
+Two benchmark entrypoints:
+
+- **PDE-only stencil cost** (isolates local operator cost):
+
+```bash
+python benchmarks/bench_pde_step.py --device cuda --out_dir results/bench
+```
+
+- **Block-level cost** (TransformerEncoderLayer + PDE refinement, includes transpose/layout overhead):
+
+```bash
+python benchmarks/bench_block.py --device cuda --out_dir results/bench
+```
+
+## Profiler Evidence
+
+Use `torch.profiler` to capture traces and quantify where time/memory goes (matmul vs stencil vs transpose/layout):
+
+```bash
+python profiling/profile_pde.py --device cuda --out_dir profiling/out
+```
+
+Open the exported Chrome trace:
+
+- `profiling/out/trace.json` (load in `chrome://tracing` or Perfetto)
+
+## Kernel Status
+
+| Component | PyTorch | Triton | Notes |
+|---|---:|---:|---|
+| PDE diffusion (forward) | ✅ | 🟡 | `kernels/diffusion_triton.py` provides a minimal stencil kernel stub |
+| PDE diffusion (backward) | ✅ | 🔜 | planned |
+| PDE multi-step fusion | 🔜 | 🔜 | planned (reduce HBM roundtrips for `pde_steps>1`) |
+
+## Serving Integration Roadmap
+
+Target: long-context **prefill** acceleration and controllable token mixing in serving stacks.
+
+- **Prefill-only integration**: apply PDE refinement after attention for long prompts; keep decode path unchanged.
+- **Custom op route**: implement fused multi-step stencil as a custom op (Triton/CUDA) and call from PyTorch.
+- **vLLM integration idea**: place PDE refinement as an optional post-attention mixing module inside the attention block (prefill path), with a kernel specialized for contiguous `[B, D, L]` layouts.
+
 ## 🌟 Overview
 
 Continuous-Time Attention addresses the challenges of long-sequence modeling in Transformers by:
