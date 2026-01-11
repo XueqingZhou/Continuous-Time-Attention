@@ -19,6 +19,13 @@ This repo provides:
 
 The following plots are generated from the scripts under `benchmarks/` (synthetic inputs, forward-only). They are meant to answer the serving question: **how does latency / peak memory scale with sequence length?**
 
+- **Evidence snapshot (A800-80GB, bf16, B=1, D=512, heads=8, diffusion, steps=4)**:
+  - **L=4096**: baseline p50 **0.607 ms** → transformer+pde p50 **0.988 ms** (**+0.381 ms**, ~**1.63×**)
+  - **L=16384**: baseline p50 **4.108 ms** → transformer+pde p50 **5.688 ms** (**+1.58 ms**, ~**1.38×**)
+  - **Peak memory (p95)**:
+    - **L=4096**: baseline **48.0 MiB** → transformer+pde **63.1 MiB** (**+15.1 MiB**)
+    - **L=16384**: baseline **143.2 MiB** → transformer+pde **207.1 MiB** (**+63.9 MiB**)
+
 - **Latency vs Sequence Length**
   - Output: `assets/images/system_latency_vs_seqlen.png`
 - **Peak Memory vs Sequence Length**
@@ -60,7 +67,12 @@ python profiling/profile_pde.py --device cuda --out_dir profiling/out
 
 Open the exported Chrome trace:
 
-- `profiling/out/trace.json` (load in `chrome://tracing` or Perfetto)
+- `profiling/out/trace_*.json` (load in `chrome://tracing` or Perfetto)
+
+Quick takeaways from the same setup as above (`mode=block, L=4096`):
+- `cta_transformer_layer`: **~5.953 ms** self CUDA (Transformer work)
+- `cta_pde_loop`: **~5.607 ms** self CUDA (PDE refinement loop)
+- `cta_transpose_to_bdl` + `cta_transpose_to_bld`: **~0.554 ms** self CUDA total (layout overhead)
 
 ## Kernel Status
 
@@ -378,7 +390,7 @@ A: We add PDE refinement layers after each Transformer layer to model continuous
 A: For most tasks, `diffusion` works well. See Table 5 in the paper for comparisons across PDE variants.
 
 **Q: What about computational cost?**
-A: PDE layers add minimal overhead (~10%) while providing consistent accuracy improvements.
+A: Overhead depends on `pde_steps`, hidden size, and sequence length. See the **System Efficiency** plots and the **Evidence snapshot** above for concrete latency/memory scaling under a serving-style (forward-only) setup.
 
 **Q: Can I use this with pre-trained models?**
 A: Yes! You can integrate PDE layers into existing Transformer architectures. See the `models/transformers.py` for examples.
