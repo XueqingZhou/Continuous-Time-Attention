@@ -1,0 +1,24 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Local notes / planning docs (do not commit)
+next_step.md
+ysy.md
+
+# Local experiment outputs (keep repo clean; already-tracked files remain tracked)
+results/
+profiling/out/
