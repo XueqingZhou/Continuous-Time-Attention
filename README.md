@@ -27,9 +27,12 @@ The following plots are generated from the scripts under `benchmarks/` (syntheti
     - **L=16384**: baseline **143.2 MiB** → transformer+pde **207.1 MiB** (**+63.9 MiB**)
 
 - **Latency vs Sequence Length**
-  - Output: `assets/images/system_latency_vs_seqlen.png`
+
+  ![System Latency vs Sequence Length](assets/images/system_latency_vs_seqlen.png)
+
 - **Peak Memory vs Sequence Length**
-  - Output: `assets/images/system_mem_vs_seqlen.png`
+
+  ![Peak Memory vs Sequence Length](assets/images/system_mem_vs_seqlen.png)
 
 Generate (GPU recommended):
 
