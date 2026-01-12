@@ -16,8 +16,10 @@ htmlcov/
 .vscode/
 
 # Local notes / planning docs (do not commit)
+local/
 next_step.md
 ysy.md
+profiling.md
 
 # Local experiment outputs (keep repo clean; already-tracked files remain tracked)
 results/
