@@ -1,0 +1,70 @@
+*** Begin Patch
+*** Update File: vllm/model_executor/models/llama.py
+@@
+-import torch
++import os
++import torch
++from typing import Optional
++
++from cta.serving_vllm import CtaConfig, CtaPostAttnMixer
+@@
++def _build_cta_mixer() -> Optional[CtaPostAttnMixer]:
++    if os.getenv("VLLM_CTA_ENABLE", "0") != "1":
++        return None
++    steps = int(os.getenv("VLLM_CTA_STEPS", "4"))
++    alpha = float(os.getenv("VLLM_CTA_ALPHA", "0.10"))
++    layout = os.getenv("VLLM_CTA_LAYOUT", "bld")
++    use_triton = os.getenv("VLLM_CTA_USE_TRITON", "1") == "1"
++    fused = os.getenv("VLLM_CTA_FUSED", "1") == "1"
++    allow_transpose = os.getenv("VLLM_CTA_ALLOW_TRANSPOSE", "1") == "1"
++    min_seq_len = int(os.getenv("VLLM_CTA_LEN_THRESHOLD", "0"))
++    steps_policy = os.getenv("VLLM_CTA_STEPS_POLICY", "fixed")
++    steps_scale = int(os.getenv("VLLM_CTA_STEPS_SCALE", "2048"))
++    max_steps = int(os.getenv("VLLM_CTA_MAX_STEPS", "8"))
++    use_buffer_pool = os.getenv("VLLM_CTA_USE_BUFFER_POOL", "0") == "1"
++    trace = os.getenv("VLLM_CTA_TRACE", "1") == "1"
++    return CtaPostAttnMixer(
++        CtaConfig(
++            enabled=True,
++            prefill_only=True,
++            steps=steps,
++            alpha=alpha,
++            layout=layout,
++            use_triton=use_triton,
++            fused=fused,
++            allow_transpose=allow_transpose,
++            min_seq_len=min_seq_len,
++            steps_policy=steps_policy,
++            steps_scale=steps_scale,
++            max_steps=max_steps,
++            use_buffer_pool=use_buffer_pool,
++            trace=trace,
++        )
++    )
+@@
+ class LlamaDecoderLayer(nn.Module):
+     def __init__(self, config: LlamaConfig):
+         super().__init__()
+@@
++        # Optional CTA post-attn mixer (prefill-only).
++        self.cta_mixer = _build_cta_mixer()
+@@
+     def forward(
+         self,
+         positions: torch.Tensor,
+         hidden_states: torch.Tensor,
+         kv_cache: Optional[KVCache],
+         attn_metadata: AttentionMetadata,
+     ) -> torch.Tensor:
+@@
+         attn_output = self.self_attn(
+             positions=positions,
+             hidden_states=hidden_states,
+             kv_cache=kv_cache,
+             attn_metadata=attn_metadata,
+         )
++        if self.cta_mixer is not None:
++            attn_output = self.cta_mixer(attn_output, attn_metadata=attn_metadata)
+         hidden_states = residual + attn_output
+*** End Patch
+

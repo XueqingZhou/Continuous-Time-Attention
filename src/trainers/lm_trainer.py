@@ -2,6 +2,8 @@
 Trainer for language modeling tasks
 """
 
+from typing import Dict, Optional, Tuple
+
 import torch
 import torch.nn as nn
 from tqdm import tqdm
@@ -11,14 +13,22 @@ import numpy as np
 class LanguageModelingTrainer:
     """Trainer for language modeling tasks"""
     
-    def __init__(self, model, device, optimizer, scheduler=None):
+    def __init__(
+        self,
+        model: torch.nn.Module,
+        device: torch.device,
+        optimizer: torch.optim.Optimizer,
+        scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
+    ) -> None:
         self.model = model
         self.device = device
         self.optimizer = optimizer
         self.scheduler = scheduler
-        self.criterion = nn.CrossEntropyLoss()
+        # Use ignore_index=-100 to ignore padding tokens in loss calculation
+        # reduction='sum' enables strict token-weighted aggregation.
+        self.criterion = nn.CrossEntropyLoss(ignore_index=-100, reduction="sum")
         
-    def train_epoch(self, dataloader):
+    def train_epoch(self, dataloader: torch.utils.data.DataLoader) -> Tuple[float, float, int]:
         """
         Train for one epoch.
         
@@ -27,7 +37,8 @@ class LanguageModelingTrainer:
             perplexity: Training perplexity
         """
         self.model.train()
-        total_loss = 0
+        total_nll = 0.0
+        total_tokens = 0
         
         for batch in tqdm(dataloader, desc="Training"):
             try:
@@ -38,16 +49,28 @@ class LanguageModelingTrainer:
                 # Targets are input_ids shifted by one position
                 targets = input_ids[:, 1:].contiguous()
                 
+                # Mask out padding positions in targets (align with outputs[:, :-1])
+                # attention_mask[:, 1:] corresponds to positions in targets
+                labels_mask = attention_mask[:, 1:].contiguous()
+                # Set padding positions to ignore_index
+                targets_masked = targets.clone()
+                targets_masked[labels_mask == 0] = -100
+                
                 # Forward pass
                 self.optimizer.zero_grad()
                 outputs = self.model(input_ids, attention_mask)
                 
                 # Compute loss (predict next token for each position)
                 # outputs[:, :-1] predicts tokens at positions 1:
-                loss = self.criterion(
+                # Only valid tokens (where targets_masked != -100) will contribute to loss
+                nll_sum = self.criterion(
                     outputs[:, :-1, :].contiguous().view(-1, outputs.size(-1)),
-                    targets.view(-1)
+                    targets_masked.view(-1)
                 )
+                batch_tokens = int(labels_mask.sum().item())
+                if batch_tokens == 0:
+                    continue
+                loss = nll_sum / batch_tokens
                 
                 # Backward pass
                 loss.backward()
@@ -57,7 +80,8 @@ class LanguageModelingTrainer:
                 if self.scheduler:
                     self.scheduler.step()
                 
-                total_loss += loss.item()
+                total_nll += float(nll_sum.item())
+                total_tokens += batch_tokens
                 
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
@@ -67,12 +91,12 @@ class LanguageModelingTrainer:
                 else:
                     raise e
         
-        avg_loss = total_loss / len(dataloader)
-        perplexity = np.exp(avg_loss) if avg_loss < 100 else float('inf')
+        avg_nll = total_nll / max(total_tokens, 1)
+        perplexity = np.exp(avg_nll) if avg_nll < 100 else float("inf")
         
-        return avg_loss, perplexity
+        return avg_nll, perplexity, total_tokens
     
-    def evaluate(self, dataloader):
+    def evaluate(self, dataloader: torch.utils.data.DataLoader) -> Tuple[float, float, int]:
         """
         Evaluate the model.
         
@@ -81,7 +105,8 @@ class LanguageModelingTrainer:
             perplexity: Validation perplexity
         """
         self.model.eval()
-        total_loss = 0
+        total_nll = 0.0
+        total_tokens = 0
         
         with torch.no_grad():
             for batch in tqdm(dataloader, desc="Evaluating"):
@@ -93,16 +118,24 @@ class LanguageModelingTrainer:
                     # Targets
                     targets = input_ids[:, 1:].contiguous()
                     
+                    # Mask out padding positions in targets (align with outputs[:, :-1])
+                    labels_mask = attention_mask[:, 1:].contiguous()
+                    targets_masked = targets.clone()
+                    targets_masked[labels_mask == 0] = -100
+                    
                     # Forward pass
                     outputs = self.model(input_ids, attention_mask)
                     
-                    # Compute loss
-                    loss = self.criterion(
+                    # Compute loss (only on valid tokens)
+                    nll_sum = self.criterion(
                         outputs[:, :-1, :].contiguous().view(-1, outputs.size(-1)),
-                        targets.view(-1)
+                        targets_masked.view(-1)
                     )
-                    
-                    total_loss += loss.item()
+                    batch_tokens = int(labels_mask.sum().item())
+                    if batch_tokens == 0:
+                        continue
+                    total_nll += float(nll_sum.item())
+                    total_tokens += batch_tokens
                     
                 except RuntimeError as e:
                     if "out of memory" in str(e).lower():
@@ -112,12 +145,17 @@ class LanguageModelingTrainer:
                     else:
                         raise e
         
-        avg_loss = total_loss / len(dataloader)
-        perplexity = np.exp(avg_loss) if avg_loss < 100 else float('inf')
+        avg_nll = total_nll / max(total_tokens, 1)
+        perplexity = np.exp(avg_nll) if avg_nll < 100 else float("inf")
         
-        return avg_loss, perplexity
+        return avg_nll, perplexity, total_tokens
     
-    def train(self, train_loader, val_loader, num_epochs):
+    def train(
+        self,
+        train_loader: torch.utils.data.DataLoader,
+        val_loader: torch.utils.data.DataLoader,
+        num_epochs: int,
+    ) -> Dict[str, list]:
         """
         Full training loop.
         
@@ -137,11 +175,11 @@ class LanguageModelingTrainer:
             print(f"\nEpoch {epoch + 1}/{num_epochs}")
             
             # Train
-            train_loss, train_ppl = self.train_epoch(train_loader)
+            train_loss, train_ppl, train_tokens = self.train_epoch(train_loader)
             print(f"Train Loss: {train_loss:.4f}, Train PPL: {train_ppl:.2f}")
             
             # Validate
-            val_loss, val_ppl = self.evaluate(val_loader)
+            val_loss, val_ppl, val_tokens = self.evaluate(val_loader)
             print(f"Val Loss: {val_loss:.4f}, Val PPL: {val_ppl:.2f}")
             
             # Save history
@@ -149,6 +187,8 @@ class LanguageModelingTrainer:
             history['train_ppl'].append(train_ppl)
             history['val_loss'].append(val_loss)
             history['val_ppl'].append(val_ppl)
+            history.setdefault("train_tokens", []).append(train_tokens)
+            history.setdefault("val_tokens", []).append(val_tokens)
             
             # Track best model
             if val_ppl < best_val_ppl:

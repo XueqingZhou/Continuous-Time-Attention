@@ -52,6 +52,7 @@ def run_profile(
     num_heads: int,
     pde_type: str,
     pde_steps: int,
+    pde_layout: str,
     mode: str,
     out_dir: str,
     tag: str,
@@ -72,7 +73,7 @@ def run_profile(
     # Build workload
     if mode == "pde_only":
         x = torch.randn(batch_size, hidden_size, seq_len, device=device, dtype=dtype)
-        pde_layers = [create_pde_layer(pde_type, hidden_size).to(device) for _ in range(pde_steps)]
+        pde_layers = [create_pde_layer(pde_type, hidden_size, layout=pde_layout).to(device) for _ in range(pde_steps)]
         for l in pde_layers:
             l.eval()
 
@@ -98,20 +99,26 @@ def run_profile(
         transformer.eval()
 
         x = torch.randn(batch_size, seq_len, hidden_size, device=device, dtype=dtype)
-        pde_layers = [create_pde_layer(pde_type, hidden_size).to(device) for _ in range(pde_steps)]
+        pde_layers = [create_pde_layer(pde_type, hidden_size, layout=pde_layout).to(device) for _ in range(pde_steps)]
         for l in pde_layers:
             l.eval()
 
         def step() -> torch.Tensor:
             with record_function("cta_transformer_layer"):
                 y = transformer(x)
-            with record_function("cta_transpose_to_bdl"):
-                y_t = y.transpose(1, 2).contiguous()
+            if pde_layout == "bdl":
+                with record_function("cta_transpose_to_bdl"):
+                    y_t = y.transpose(1, 2).contiguous()
+                with record_function("cta_pde_loop"):
+                    for l in pde_layers:
+                        y_t = l(y_t)
+                with record_function("cta_transpose_to_bld"):
+                    return y_t.transpose(1, 2).contiguous()
+            # layout=bld
             with record_function("cta_pde_loop"):
                 for l in pde_layers:
-                    y_t = l(y_t)
-            with record_function("cta_transpose_to_bld"):
-                return y_t.transpose(1, 2).contiguous()
+                    y = l(y)
+            return y
 
     # Warmup (not profiled)
     for _ in range(warmup):
@@ -157,6 +164,13 @@ def main() -> None:
     parser.add_argument("--hidden_size", type=int, default=512)
     parser.add_argument("--num_heads", type=int, default=8)
     parser.add_argument(
+        "--pde_layout",
+        type=str,
+        default="bld",
+        choices=["bld", "bdl"],
+        help="Layout expected by PDE layers; bld avoids transpose overhead.",
+    )
+    parser.add_argument(
         "--pde_type",
         type=str,
         default="diffusion",
@@ -177,7 +191,7 @@ def main() -> None:
 
     tag = args.tag
     if tag is None:
-        tag = f"{args.mode}_B{args.batch_size}_L{args.seq_len}_D{args.hidden_size}_h{args.num_heads}_{args.pde_type}_s{args.pde_steps}_{args.dtype}_{args.device}"
+        tag = f"{args.mode}_B{args.batch_size}_L{args.seq_len}_D{args.hidden_size}_h{args.num_heads}_{args.pde_type}_s{args.pde_steps}_layout{args.pde_layout}_{args.dtype}_{args.device}"
 
     run_profile(
         device=device,
@@ -188,6 +202,7 @@ def main() -> None:
         num_heads=args.num_heads,
         pde_type=args.pde_type,
         pde_steps=args.pde_steps,
+        pde_layout=args.pde_layout,
         mode=args.mode,
         out_dir=args.out_dir,
         tag=tag,

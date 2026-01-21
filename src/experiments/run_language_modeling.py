@@ -17,9 +17,11 @@ import json
 from models import PDETransformerLM, StandardTransformerLM
 from data import prepare_lm_data
 from trainers import LanguageModelingTrainer
+from utils.config import load_yaml_config, set_defaults_from_config
+from utils.metadata import collect_metadata, write_metadata
 
 
-def main(args):
+def main(args: argparse.Namespace) -> None:
     # Set device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
@@ -34,9 +36,11 @@ def main(args):
     train_dataset, val_dataset, vocab_size = prepare_lm_data(
         tokenizer_path=args.tokenizer_path,
         max_length=args.max_length,
+        block_size=args.block_size,
         train_sample_size=args.train_sample_size,
         val_sample_size=args.val_sample_size,
-        cache_dir=args.cache_dir
+        cache_dir=args.cache_dir,
+        add_eos=args.add_eos,
     )
     
     train_loader = DataLoader(
@@ -141,21 +145,61 @@ def main(args):
             json.dump(results, f, indent=2)
         print(f"\nResults saved to: {output_file}")
 
+        meta = collect_metadata(
+            command=" ".join(sys.argv),
+            config_path=args.config,
+            extra={"args": vars(args)},
+        )
+        meta_file = os.path.join(args.output_dir, "wikitext103_meta.json")
+        write_metadata(meta_file, meta)
+        print(f"Metadata saved to: {meta_file}")
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run WikiText-103 language modeling experiment')
+
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to YAML config file",
+    )
     
     # Dataset arguments
-    parser.add_argument('--tokenizer_path', type=str, required=True,
-                        help='Path to tokenizer')
+    parser.add_argument(
+        "--tokenizer_path",
+        type=str,
+        default="./local_models/tinyllama",
+        help="Path to tokenizer (GPT/BPE recommended for LM)",
+    )
     parser.add_argument('--cache_dir', type=str, default=None,
                         help='Directory to cache dataset')
-    parser.add_argument('--max_length', type=int, default=512,
-                        help='Maximum sequence length')
+    parser.add_argument(
+        "--max_length",
+        type=int,
+        default=512,
+        help="Maximum sequence length (used as block_size if not set)",
+    )
+    parser.add_argument(
+        "--block_size",
+        type=int,
+        default=None,
+        help="Block size for LM token stream (no padding)",
+    )
     parser.add_argument('--train_sample_size', type=int, default=None,
                         help='Number of training samples (None for all)')
-    parser.add_argument('--val_sample_size', type=int, default=None,
-                        help='Number of validation samples (None for all)')
+    parser.add_argument(
+        "--val_sample_size",
+        type=int,
+        default=None,
+        help="Number of validation samples (None for all)",
+    )
+    parser.add_argument(
+        "--add_eos",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Append EOS between documents in LM token stream",
+    )
     
     # Model arguments
     parser.add_argument('--embed_dim', type=int, default=128,
@@ -196,6 +240,36 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', type=str, default='results',
                         help='Directory to save results')
     
+    config_mapping = {
+        "tokenizer_path": ("tokenizer", "path"),
+        "max_length": ("dataset", "max_length"),
+        "block_size": ("dataset", "block_size"),
+        "train_sample_size": ("dataset", "train_sample_size"),
+        "val_sample_size": ("dataset", "val_sample_size"),
+        "cache_dir": ("dataset", "cache_dir"),
+        "add_eos": ("dataset", "add_eos"),
+        "embed_dim": ("model", "embed_dim"),
+        "num_heads": ("model", "num_heads"),
+        "hidden_dim": ("model", "hidden_dim"),
+        "num_layers": ("model", "num_layers"),
+        "dropout": ("model", "dropout"),
+        "pde_type": ("pde", "type"),
+        "pde_steps": ("pde", "steps"),
+        "batch_size": ("training", "batch_size"),
+        "num_epochs": ("training", "num_epochs"),
+        "learning_rate": ("training", "learning_rate"),
+        "weight_decay": ("training", "weight_decay"),
+        "warmup_ratio": ("training", "warmup_ratio"),
+        "num_workers": ("training", "num_workers"),
+        "seed": ("training", "seed"),
+        "output_dir": ("output", "dir"),
+    }
+
+    pre_args, _ = parser.parse_known_args()
+    if pre_args.config:
+        cfg = load_yaml_config(pre_args.config)
+        set_defaults_from_config(parser, cfg, config_mapping)
+
     args = parser.parse_args()
     main(args)
 

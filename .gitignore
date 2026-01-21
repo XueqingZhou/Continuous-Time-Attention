@@ -10,17 +10,33 @@ __pycache__/
 .coverage
 htmlcov/
 
+# Virtual envs
+.venv/
+venv/
+ENV/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+
 # OS / editor
 .DS_Store
 .idea/
 .vscode/
 
-# Local notes / planning docs (do not commit)
-local/
-next_step.md
-ysy.md
-profiling.md
-
-# Local experiment outputs (keep repo clean; already-tracked files remain tracked)
+# Large generated artifacts (reproducible via scripts)
 results/
 profiling/out/
+
+# Traces and profiler exports
+**/trace_*.json
+**/summary_*.txt
+
+# Model weights / large checkpoints
+# - If you want to version them, use Git LFS (see `.gitattributes`).
+# - If you don't want to version them, simply avoid adding them to git.
+
+# Local notes / planning docs (do not commit)
+local/
+

@@ -10,6 +10,25 @@ import torch.nn as nn
 from .pde_layers import create_pde_layer
 
 
+def generate_causal_mask(seq_len, device):
+    """
+    Generate a causal (lower triangular) mask for self-attention.
+    
+    Args:
+        seq_len (int): Sequence length
+        device: Device to create mask on
+    
+    Returns:
+        mask: (seq_len, seq_len) tensor where mask[i, j] = True if j > i (masked)
+              This means position i can only attend to positions <= i
+    """
+    # Create lower triangular mask: True = masked (cannot attend)
+    # For causal: position i can attend to j where j <= i
+    # So we mask positions where j > i
+    mask = torch.triu(torch.ones(seq_len, seq_len, device=device, dtype=torch.bool), diagonal=1)
+    return mask
+
+
 class PDETransformerClassifier(nn.Module):
     """
     PDE-Transformer for sequence classification tasks.
@@ -40,6 +59,7 @@ class PDETransformerClassifier(nn.Module):
         num_classes,
         pde_type='diffusion',
         pde_steps=1,
+        pde_layout: str = 'bld',
         max_length=512,
         dropout=0.1,
         **pde_kwargs
@@ -63,9 +83,10 @@ class PDETransformerClassifier(nn.Module):
         ])
         
         # PDE refinement layers (one per Transformer layer)
+        self.pde_layout = pde_layout
         self.pde_layers = nn.ModuleList([
             nn.ModuleList([
-                create_pde_layer(pde_type, embed_dim, **pde_kwargs)
+                create_pde_layer(pde_type, embed_dim, layout=pde_layout, **pde_kwargs)
                 for _ in range(pde_steps)
             ])
             for _ in range(num_layers)
@@ -97,12 +118,16 @@ class PDETransformerClassifier(nn.Module):
             # Transformer layer
             x = transformer_layer(x, src_key_padding_mask=padding_mask)
             
-            # PDE refinement steps
-            # Note: PDE layers expect (batch, hidden, seq_len) format
-            x_transposed = x.transpose(1, 2)  # (batch, seq_len, hidden) -> (batch, hidden, seq_len)
-            for pde_layer in pde_layer_list:
-                x_transposed = pde_layer(x_transposed)
-            x = x_transposed.transpose(1, 2)  # Back to (batch, seq_len, hidden)
+            # PDE refinement steps (support BLD or BDL layout)
+            if self.pde_layout == 'bdl':
+                x_t = x.transpose(1, 2).contiguous()
+                for pde_layer in pde_layer_list:
+                    x_t = pde_layer(x_t)
+                x = x_t.transpose(1, 2).contiguous()
+            else:
+                # layout = 'bld' → operate directly without transpose
+                for pde_layer in pde_layer_list:
+                    x = pde_layer(x)
         
         # Masked mean pooling
         expanded_mask = attention_mask.unsqueeze(-1).expand(x.size())
@@ -216,6 +241,7 @@ class PDETransformerLM(nn.Module):
         num_layers,
         pde_type='diffusion',
         pde_steps=1,
+        pde_layout: str = 'bld',
         max_length=512,
         dropout=0.1,
         **pde_kwargs
@@ -238,10 +264,11 @@ class PDETransformerLM(nn.Module):
             for _ in range(num_layers)
         ])
         
-        # PDE layers
+        # PDE layers with causal=True for autoregressive LM
+        self.pde_layout = pde_layout
         self.pde_layers = nn.ModuleList([
             nn.ModuleList([
-                create_pde_layer(pde_type, embed_dim, **pde_kwargs)
+                create_pde_layer(pde_type, embed_dim, layout=pde_layout, causal=True, **pde_kwargs)
                 for _ in range(pde_steps)
             ])
             for _ in range(num_layers)
@@ -254,7 +281,7 @@ class PDETransformerLM(nn.Module):
         """
         Args:
             input_ids: Token indices (batch_size, seq_len)
-            attention_mask: Attention mask (batch_size, seq_len)
+            attention_mask: Attention mask (batch_size, seq_len), 1 for valid tokens
         
         Returns:
             Logits for next token prediction (batch_size, seq_len, vocab_size)
@@ -265,18 +292,27 @@ class PDETransformerLM(nn.Module):
         x = x + self.pos_encoder[:, :seq_len, :]
         x = self.dropout(x)
         
-        # Create padding mask
+        # Create padding mask (True for positions to ignore)
         padding_mask = (attention_mask == 0)
+        
+        # Create causal mask for autoregressive LM (lower triangular)
+        # mask[i, j] = True if j > i (cannot attend to future)
+        causal_mask = generate_causal_mask(seq_len, device=x.device)
         
         # Apply Transformer + PDE layers
         for transformer_layer, pde_layer_list in zip(self.transformer_layers, self.pde_layers):
-            x = transformer_layer(x, src_key_padding_mask=padding_mask)
-            
-            # Apply PDE refinement
-            x_transposed = x.transpose(1, 2)
-            for pde_layer in pde_layer_list:
-                x_transposed = pde_layer(x_transposed)
-            x = x_transposed.transpose(1, 2)
+            # Apply causal mask + padding mask
+            x = transformer_layer(x, src_mask=causal_mask, src_key_padding_mask=padding_mask)
+
+            # Apply PDE refinement with attention_mask for mask-aware updates
+            if self.pde_layout == 'bdl':
+                x_t = x.transpose(1, 2).contiguous()
+                for pde_layer in pde_layer_list:
+                    x_t = pde_layer(x_t, attention_mask=attention_mask)
+                x = x_t.transpose(1, 2).contiguous()
+            else:
+                for pde_layer in pde_layer_list:
+                    x = pde_layer(x, attention_mask=attention_mask)
         
         # Project to vocabulary
         return self.fc(x)
@@ -328,7 +364,7 @@ class StandardTransformerLM(nn.Module):
         """
         Args:
             input_ids: Token indices (batch_size, seq_len)
-            attention_mask: Attention mask (batch_size, seq_len)
+            attention_mask: Attention mask (batch_size, seq_len), 1 for valid tokens
         
         Returns:
             Logits for next token prediction (batch_size, seq_len, vocab_size)
@@ -339,11 +375,18 @@ class StandardTransformerLM(nn.Module):
         x = x + self.pos_encoder[:, :seq_len, :]
         x = self.dropout(x)
         
-        # Create padding mask
+        # Create padding mask (True for positions to ignore)
         padding_mask = (attention_mask == 0)
         
-        # Transformer encoder
-        x = self.transformer(x, src_key_padding_mask=padding_mask)
+        # Create causal mask for autoregressive LM (lower triangular)
+        # mask[i, j] = True if j > i (cannot attend to future)
+        causal_mask = generate_causal_mask(seq_len, device=x.device)
+        
+        # Transformer encoder with causal + padding mask
+        # Note: TransformerEncoder doesn't support src_mask directly, so we need to
+        # manually apply the mask to each layer
+        for layer in self.transformer.layers:
+            x = layer(x, src_mask=causal_mask, src_key_padding_mask=padding_mask)
         
         # Project to vocabulary
         return self.fc(x)

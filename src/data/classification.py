@@ -2,6 +2,8 @@
 Data preparation for classification tasks (IMDb, AG News, SST-2)
 """
 
+from typing import Dict, List, Optional, Tuple
+
 import torch
 from torch.utils.data import Dataset
 from datasets import load_dataset
@@ -11,25 +13,25 @@ from transformers import BertTokenizer
 class ClassificationDataset(Dataset):
     """Dataset for text classification tasks"""
     
-    def __init__(self, encodings, labels):
+    def __init__(self, encodings: Dict[str, List[List[int]]], labels: List[int]) -> None:
         self.encodings = encodings
         self.labels = labels
     
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         item = {key: torch.tensor(val[idx]) for key, val in self.encodings.items()}
         item['labels'] = torch.tensor(self.labels[idx])
         return item
     
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.labels)
 
 
 def prepare_classification_data(
-    dataset_name,
-    tokenizer_path,
-    max_length=256,
-    cache_dir=None
-):
+    dataset_name: str,
+    tokenizer_path: str,
+    max_length: int = 256,
+    cache_dir: Optional[str] = None,
+) -> Tuple[Dataset, Dataset, int, int]:
     """
     Prepare data for classification tasks.
     
@@ -86,9 +88,15 @@ def prepare_classification_data(
         raise ValueError(f"Unknown dataset: {dataset_name}")
     
     # Extract texts and labels
-    train_texts = dataset[train_split][text_field]
+    # NOTE:
+    # Some offline/cached datasets may return non-str types (e.g. bytes, numpy scalars).
+    # The tokenizer expects input to be str / list[str] / list[list[str]].
+    # We explicitly cast to str here to avoid type issues.
+    raw_train_texts = dataset[train_split][text_field]
+    raw_test_texts = dataset[test_split][text_field]
+    train_texts = [str(x) for x in raw_train_texts]
+    test_texts = [str(x) for x in raw_test_texts]
     train_labels = dataset[train_split][label_field]
-    test_texts = dataset[test_split][text_field]
     test_labels = dataset[test_split][label_field]
     
     # Tokenize

@@ -1,0 +1,32 @@
+# Configuration for SST-2 Classification Experiment (Table 1)
+
+dataset:
+  name: "sst2"
+  max_length: 128
+  cache_dir: null
+
+tokenizer:
+  path: "./src/tokenizer/bert-base-uncased"
+
+model:
+  embed_dim: 128
+  num_heads: 4
+  hidden_dim: 256
+  num_layers: 2
+  dropout: 0.1
+  
+pde:
+  type: "diffusion"
+  steps: 1
+
+training:
+  batch_size: 512
+  num_epochs: 2
+  learning_rate: 1e-4
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  num_workers: 0
+  seed: 42
+
+output:
+  dir: "results"

@@ -6,7 +6,7 @@ dataset:
   cache_dir: null
 
 tokenizer:
-  path: "./tokenizer/bert-base-uncased"
+  path: "./src/tokenizer/bert-base-uncased"
 
 model:
   embed_dim: 128

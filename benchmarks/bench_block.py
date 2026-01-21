@@ -5,8 +5,8 @@ This benchmark is designed for serving/prefill analysis:
 - measures latency scaling with sequence length
 - measures peak CUDA memory allocation (approx proxy for activation footprint)
 
-It intentionally includes the transpose/layout overhead incurred by the current
-PDE integration pattern in `src/models/transformers.py`.
+It can optionally include transpose/layout overhead (use `--pde_layout bdl`)
+or avoid it by using the native `bld` layout in the PDE layers.
 """
 
 from __future__ import annotations
@@ -134,6 +134,13 @@ def main() -> None:
     parser.add_argument("--seq_lens", type=int, nargs="+", default=[512, 1024, 2048, 4096, 8192, 16384])
     parser.add_argument("--hidden_size", type=int, default=512)
     parser.add_argument("--num_heads", type=int, default=8)
+    parser.add_argument(
+        "--pde_layout",
+        type=str,
+        default="bld",
+        choices=["bld", "bdl"],
+        help="Layout expected by PDE layers; bld avoids transpose overhead.",
+    )
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--iters", type=int, default=30)
     parser.add_argument("--warmup", type=int, default=10)
@@ -209,7 +216,7 @@ def main() -> None:
             continue
 
         pde_layers = [
-            create_pde_layer(args.pde_type, args.hidden_size).to(device)
+            create_pde_layer(args.pde_type, args.hidden_size, layout=args.pde_layout).to(device)
             for _ in range(args.pde_steps)
         ]
         for layer in pde_layers:
@@ -218,10 +225,15 @@ def main() -> None:
         @torch.no_grad()
         def pde_fn() -> torch.Tensor:
             y = transformer(x)
-            y_t = y.transpose(1, 2).contiguous()  # (B, L, D) -> (B, D, L)
+            if args.pde_layout == "bdl":
+                y_t = y.transpose(1, 2).contiguous()  # (B, L, D) -> (B, D, L)
+                for layer in pde_layers:
+                    y_t = layer(y_t)
+                return y_t.transpose(1, 2).contiguous()
+            # layout=bld: operate directly without extra transpose
             for layer in pde_layers:
-                y_t = layer(y_t)
-            return y_t.transpose(1, 2).contiguous()
+                y = layer(y)
+            return y
 
         if args.device == "cuda":
             times_ms, mems = _bench_cuda(pde_fn, iters=args.iters, warmup=args.warmup)

@@ -4,61 +4,54 @@
 
 set -e
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SRC_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+REPO_DIR="$(cd -- "${SRC_DIR}/.." && pwd)"
+
 echo "================================================"
 echo "  Ablation Studies for Continuous-Time Attention"
 echo "================================================"
 
-# Check tokenizer
-if [ ! -d "./tokenizer/bert-base-uncased" ]; then
-    echo "Tokenizer not found. Running preparation..."
-    bash scripts/prepare_tokenizer.sh
-fi
+export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 
-mkdir -p results/ablation
+# Ensure relative paths in configs resolve correctly
+cd "${REPO_DIR}"
+
+mkdir -p "${REPO_DIR}/results/ablation"
 
 echo ""
 echo "=========================================="
 echo "  Ablation 1: Data Size"
 echo "=========================================="
 
-python experiments/run_ablation_datasize.py \
-    --tokenizer_path ./tokenizer/bert-base-uncased \
+python "${SRC_DIR}/experiments/run_ablation_datasize.py" \
+    --config "${SRC_DIR}/configs/wikitext103.yaml" \
     --data_sizes 0.001 0.01 0.05 0.1 \
-    --max_length 512 \
-    --batch_size 128 \
-    --num_epochs 10 \
-    --output_dir results/ablation
+    --output_dir "${REPO_DIR}/results/ablation"
 
 echo ""
 echo "=========================================="
 echo "  Ablation 2: PDE Steps (Table 4)"
 echo "=========================================="
 
-python experiments/run_ablation_pdesteps.py \
-    --tokenizer_path ./tokenizer/bert-base-uncased \
+python "${SRC_DIR}/experiments/run_ablation_pdesteps.py" \
+    --config "${SRC_DIR}/configs/wikitext103.yaml" \
     --pde_steps_list 0 1 2 4 8 \
-    --max_length 512 \
-    --batch_size 128 \
-    --num_epochs 20 \
-    --output_dir results/ablation
+    --output_dir "${REPO_DIR}/results/ablation"
 
 echo ""
 echo "=========================================="
 echo "  Ablation 3: PDE Types (Table 5)"
 echo "=========================================="
 
-python experiments/run_ablation_pdetype.py \
-    --tokenizer_path ./tokenizer/bert-base-uncased \
+python "${SRC_DIR}/experiments/run_ablation_pdetype.py" \
+    --config "${SRC_DIR}/configs/wikitext103.yaml" \
     --pde_types diffusion wave reaction-diffusion advection-diffusion \
-    --pde_steps 4 \
-    --max_length 512 \
-    --batch_size 128 \
-    --num_epochs 20 \
-    --output_dir results/ablation
+    --output_dir "${REPO_DIR}/results/ablation"
 
 echo ""
 echo "================================================"
 echo "  All ablation studies completed!"
-echo "  Results saved in ./results/ablation/"
+echo "  Results saved in ${REPO_DIR}/results/ablation"
 echo "================================================"
 

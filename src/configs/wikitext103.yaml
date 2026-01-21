@@ -3,12 +3,14 @@
 dataset:
   name: "wikitext-103-v1"
   max_length: 512
+  block_size: 512
   train_sample_size: null  # Use all data
   val_sample_size: null
   cache_dir: null
+  add_eos: true
 
 tokenizer:
-  path: "./tokenizer/bert-base-uncased"
+  path: "./local_models/tinyllama"
 
 model:
   embed_dim: 128

@@ -6,6 +6,63 @@
 
 Official PyTorch implementation of **Continuous-Time Attention**, a PDE-guided formulation of self-attention that treats token interactions as trajectories of a continuous-time dynamical system governed by partial differential equations.
 
+## Portfolio Snapshot (Algorithm → Kernel → Serving)
+
+This repo is intentionally maintained as an **algorithm-to-systems portfolio**: take a mathematically grounded token-mixing operator (PDE/stencil), implement it as a **fused Triton kernel**, and integrate it into a **vLLM serving stack** with end-to-end evidence.
+
+- **Kernel (Triton fusion)**: multi-step fused diffusion stencil to reduce **HBM roundtrips** and **kernel launch overhead**.
+- **Serving (vLLM integration)**: prefill/decode integration + scheduler/memory/telemetry knobs for controllable long-context serving.
+- **Evidence-first**: scaling curves (latency/memory), profiler traces, and reproducible scripts.
+
+### Reproduce (GPU)
+
+```bash
+# 0) Install PyTorch first (CPU/CUDA) following the official guide.
+#    Examples:
+#    - CPU-only:
+#      pip install torch --index-url https://download.pytorch.org/whl/cpu
+#    - CUDA (example; pick the right cuXX index for your machine):
+#      pip install torch --index-url https://download.pytorch.org/whl/cu128
+#
+# Then install repo dependencies (everything except torch):
+pip install -r src/requirements.txt
+
+# Optional: vLLM integration (serving)
+pip install vllm==0.13.0
+
+# 1) System efficiency curves (prefill-style, forward-only)
+python benchmarks/bench_block.py --device cuda --out_dir results/bench
+python benchmarks/plot_system_efficiency.py --in_dir results/bench --out_dir assets/images
+
+# 2) Profiler traces (where time goes: matmul vs stencil vs transpose)
+python profiling/profile_pde.py --device cuda --out_dir profiling/out
+
+# 3) vLLM end-to-end (baseline vs CTA; see serving/vllm)
+bash serving/vllm/bench/run_all.sh
+```
+
+## System Diagram (High-Level Dataflow)
+
+```mermaid
+flowchart LR
+  PromptTokens --> PrefillAttention
+  PrefillAttention -->|"post-attn mixing (CTA)"| CtaMixing
+  CtaMixing -->|"Triton fused stencil"| FusedKernel
+  FusedKernel --> HiddenStates
+  HiddenStates --> Decode
+  Decode --> OutputTokens
+```
+
+## Done Criteria (Engineering Deliverables)
+
+- **Kernel**:
+  - multi-step fused diffusion (`steps∈{2,4,8}`) completes in **one launch** and matches reference
+  - wins vs non-fused in at least **two** of: total CUDA time / launch count / bandwidth trend
+- **vLLM**:
+  - one-command reproducible e2e numbers for **prefill latency / decode tokens/s / peak mem**
+  - includes a **scheduler knob** (length threshold / steps policy) and **buffer pool** integration
+  - provides trace evidence for stage-level attribution (attn vs CTA vs layout)
+
 ## System Pitch (Inference/Serving)
 
 From a systems perspective, **Continuous-Time Attention (CTA)** can be viewed as a **local stencil token-mixing operator** (e.g., diffusion Laplacian) that refines token features across a pseudo-time axis. Each PDE refinement step is **\(O(L)\)** in sequence length and is **kernel-friendly** (regular memory access, fusable multi-step updates), making it a natural building block for **long-context prefill** pipelines.
@@ -37,12 +94,16 @@ The following plots are generated from the scripts under `benchmarks/` (syntheti
 Generate (GPU recommended):
 
 ```bash
+# Install PyTorch first (CPU/CUDA), then:
 pip install -r src/requirements.txt
 
 # From repo root
 python benchmarks/bench_block.py --device cuda --out_dir results/bench
 python benchmarks/plot_system_efficiency.py --in_dir results/bench --out_dir assets/images
 ```
+
+Tip: use `--pde_layout bld` to avoid transpose overhead, or `--pde_layout bdl`
+to measure the layout cost explicitly.
 
 ## Microbenchmark
 
@@ -81,9 +142,9 @@ Quick takeaways from the same setup as above (`mode=block, L=4096`):
 
 | Component | PyTorch | Triton | Notes |
 |---|---:|---:|---|
-| PDE diffusion (forward) | ✅ | 🟡 | `kernels/diffusion_triton.py` provides a minimal stencil kernel stub |
-| PDE diffusion (backward) | ✅ | 🔜 | planned |
-| PDE multi-step fusion | 🔜 | 🔜 | planned (reduce HBM roundtrips for `pde_steps>1`) |
+| PDE diffusion (forward) | ✅ | ✅ | `kernels/diffusion_triton.py` provides an autotuned Triton kernel |
+| PDE diffusion (backward) | ✅ | ✅ | Triton K3 backward kernel |
+| PDE multi-step fusion | — | ✅ | Triton fused steps {2,4,8}; PyTorch uses loop |
 
 ## Serving Integration Roadmap
 
@@ -92,6 +153,35 @@ Target: long-context **prefill** acceleration and controllable token mixing in s
 - **Prefill-only integration**: apply PDE refinement after attention for long prompts; keep decode path unchanged.
 - **Custom op route**: implement fused multi-step stencil as a custom op (Triton/CUDA) and call from PyTorch.
 - **vLLM integration idea**: place PDE refinement as an optional post-attention mixing module inside the attention block (prefill path), with a kernel specialized for contiguous `[B, D, L]` layouts.
+
+## Serving Evidence (vLLM)
+
+Use the vLLM bench harness to produce baseline and CTA runs, then compare and plot:
+
+```bash
+# One-command end-to-end (repo-local tinyllama by default):
+bash serving/vllm/bench/run_all.sh
+
+# Or run each step manually:
+python serving/vllm/bench/bench_vllm.py --help
+python serving/vllm/bench/compare_vllm_bench.py --help
+python serving/vllm/bench/plot_vllm_bench.py --help
+python serving/vllm/bench/profile_vllm.py --help
+```
+
+Key artifacts:
+- `results/serving/vllm/bench_vllm_baseline.csv` / `.json`
+- `results/serving/vllm/bench_vllm_cta.csv` / `.json`
+- `results/serving/vllm/compare_vllm_bench.md` / `.csv`
+- `assets/images/vllm_cta_prefill_latency.png`
+- `assets/images/vllm_cta_peak_mem.png`
+- `results/serving/vllm/trace_vllm_baseline_prefill_tinyllama.json`
+- `results/serving/vllm/trace_vllm_cta_prefill_tinyllama.json`
+
+## Docs (Systems-Focused Notes)
+- `docs/math_to_kernel.md`
+- `docs/kernel_fusion_notes.md`
+- `docs/vllm_serving_notes.md`
 
 ## 🌟 Overview
 
@@ -134,11 +224,32 @@ For WikiText-103 language modeling, PDE-Transformer achieves perplexity of **1.0
 ```bash
 # Clone the repository
 git clone https://github.com/XueqingZhou/Continuous-Time-Attention.git
-cd Continuous-Time-Attention/src
+cd Continuous-Time-Attention
 
-# Install dependencies
-pip install -r requirements.txt
+# (Recommended) create a venv
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+
+# Install PyTorch (pick ONE of the following depending on your machine)
+# CPU-only:
+python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+#
+# CUDA (example; use the correct cuXX index for your driver/toolkit):
+# python -m pip install torch --index-url https://download.pytorch.org/whl/cu128
+
+# Install repo dependencies (everything except torch)
+python -m pip install -r src/requirements.txt
+
+# Run experiment scripts from `src/`
+cd src
 ```
+
+### Notes on large files (Git LFS / .gitignore)
+
+- Generated artifacts such as `results/` and `profiling/out/` are ignored and should be reproduced via scripts.
+- If you need to version model weights (e.g. `*.safetensors`), use Git LFS. This repo ships a `.gitattributes` with common weight patterns.
+  - Quick start: `git lfs install` (then commit as usual; matching files go to LFS).
 
 ### Download Tokenizer
 

@@ -4,18 +4,28 @@
 
 set -e  # Exit on error
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SRC_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+REPO_DIR="$(cd -- "${SRC_DIR}/.." && pwd)"
+
 echo "================================================"
 echo "  Continuous-Time Attention - Full Experiments"
 echo "================================================"
 
-# Check if tokenizer exists
-if [ ! -d "./tokenizer/bert-base-uncased" ]; then
-    echo "Tokenizer not found. Running preparation script..."
-    bash scripts/prepare_tokenizer.sh
+export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+
+# Ensure relative paths in configs resolve correctly
+cd "${REPO_DIR}"
+
+# Check if tokenizer exists (for classification tasks)
+if [ ! -d "${REPO_DIR}/src/tokenizer/bert-base-uncased" ]; then
+    echo "Tokenizer not found at ${REPO_DIR}/src/tokenizer/bert-base-uncased"
+    echo "Please prepare it offline before running classification experiments."
+    exit 1
 fi
 
 # Create results directory
-mkdir -p results
+mkdir -p "${REPO_DIR}/results"
 
 echo ""
 echo "=========================================="
@@ -24,78 +34,43 @@ echo "=========================================="
 
 echo ""
 echo "Running IMDb experiment..."
-python experiments/run_classification.py \
-    --dataset imdb \
-    --tokenizer_path ./tokenizer/bert-base-uncased \
-    --max_length 256 \
-    --embed_dim 128 \
-    --num_heads 4 \
-    --hidden_dim 256 \
-    --num_layers 2 \
-    --pde_type diffusion \
-    --pde_steps 1 \
-    --batch_size 64 \
-    --num_epochs 5 \
-    --output_dir results
+python "${SRC_DIR}/experiments/run_classification.py" \
+    --config "${SRC_DIR}/configs/imdb.yaml" \
+    --output_dir "${REPO_DIR}/results"
 
 echo ""
 echo "Running AG News experiment..."
-python experiments/run_classification.py \
-    --dataset ag_news \
-    --tokenizer_path ./tokenizer/bert-base-uncased \
-    --max_length 256 \
-    --batch_size 64 \
-    --num_epochs 5 \
-    --output_dir results
+python "${SRC_DIR}/experiments/run_classification.py" \
+    --config "${SRC_DIR}/configs/ag_news.yaml" \
+    --output_dir "${REPO_DIR}/results"
 
 echo ""
 echo "Running SST-2 experiment..."
-python experiments/run_classification.py \
-    --dataset sst2 \
-    --tokenizer_path ./tokenizer/bert-base-uncased \
-    --max_length 128 \
-    --batch_size 512 \
-    --num_epochs 2 \
-    --output_dir results
+python "${SRC_DIR}/experiments/run_classification.py" \
+    --config "${SRC_DIR}/configs/sst2.yaml" \
+    --output_dir "${REPO_DIR}/results"
 
 echo ""
 echo "=========================================="
 echo "  Table 2: Character-Level IMDb (LRA)"
 echo "=========================================="
 
-python experiments/run_char_level.py \
-    --max_length 2048 \
-    --embed_dim 256 \
-    --num_heads 4 \
-    --hidden_dim 1024 \
-    --num_layers 4 \
-    --pde_type diffusion \
-    --pde_steps 1 \
-    --batch_size 16 \
-    --num_epochs 10 \
-    --output_dir results
+python "${SRC_DIR}/experiments/run_char_level.py" \
+    --config "${SRC_DIR}/configs/char_level_imdb.yaml" \
+    --output_dir "${REPO_DIR}/results"
 
 echo ""
 echo "=========================================="
 echo "  Tables 3-5: WikiText-103 LM"
 echo "=========================================="
 
-python experiments/run_language_modeling.py \
-    --tokenizer_path ./tokenizer/bert-base-uncased \
-    --max_length 512 \
-    --embed_dim 128 \
-    --num_heads 4 \
-    --hidden_dim 256 \
-    --num_layers 2 \
-    --pde_type diffusion \
-    --pde_steps 4 \
-    --batch_size 16 \
-    --num_epochs 20 \
-    --output_dir results
+python "${SRC_DIR}/experiments/run_language_modeling.py" \
+    --config "${SRC_DIR}/configs/wikitext103.yaml" \
+    --output_dir "${REPO_DIR}/results"
 
 echo ""
 echo "================================================"
 echo "  All experiments completed!"
-echo "  Results saved in ./results/"
+echo "  Results saved in ${REPO_DIR}/results"
 echo "================================================"
 

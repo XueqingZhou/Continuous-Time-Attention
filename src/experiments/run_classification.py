@@ -17,9 +17,11 @@ import json
 from models import PDETransformerClassifier, StandardTransformerClassifier
 from data import prepare_classification_data
 from trainers import ClassificationTrainer
+from utils.config import load_yaml_config, set_defaults_from_config
+from utils.metadata import collect_metadata, write_metadata
 
 
-def main(args):
+def main(args: argparse.Namespace) -> None:
     # Set device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
@@ -139,15 +141,31 @@ def main(args):
             json.dump(results, f, indent=2)
         print(f"\nResults saved to: {output_file}")
 
+        meta = collect_metadata(
+            command=" ".join(sys.argv),
+            config_path=args.config,
+            extra={"args": vars(args)},
+        )
+        meta_file = os.path.join(args.output_dir, f"{args.dataset}_meta.json")
+        write_metadata(meta_file, meta)
+        print(f"Metadata saved to: {meta_file}")
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run classification experiments')
+
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to YAML config file",
+    )
     
     # Dataset arguments
-    parser.add_argument('--dataset', type=str, required=True,
+    parser.add_argument('--dataset', type=str, default=None,
                         choices=['imdb', 'ag_news', 'sst2'],
                         help='Dataset name')
-    parser.add_argument('--tokenizer_path', type=str, required=True,
+    parser.add_argument('--tokenizer_path', type=str, default=None,
                         help='Path to tokenizer')
     parser.add_argument('--cache_dir', type=str, default=None,
                         help='Directory to cache dataset')
@@ -193,6 +211,37 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', type=str, default='results',
                         help='Directory to save results')
     
+    config_mapping = {
+        "dataset": ("dataset", "name"),
+        "tokenizer_path": ("tokenizer", "path"),
+        "max_length": ("dataset", "max_length"),
+        "cache_dir": ("dataset", "cache_dir"),
+        "embed_dim": ("model", "embed_dim"),
+        "num_heads": ("model", "num_heads"),
+        "hidden_dim": ("model", "hidden_dim"),
+        "num_layers": ("model", "num_layers"),
+        "dropout": ("model", "dropout"),
+        "pde_type": ("pde", "type"),
+        "pde_steps": ("pde", "steps"),
+        "batch_size": ("training", "batch_size"),
+        "num_epochs": ("training", "num_epochs"),
+        "learning_rate": ("training", "learning_rate"),
+        "weight_decay": ("training", "weight_decay"),
+        "warmup_ratio": ("training", "warmup_ratio"),
+        "num_workers": ("training", "num_workers"),
+        "seed": ("training", "seed"),
+        "output_dir": ("output", "dir"),
+    }
+
+    pre_args, _ = parser.parse_known_args()
+    if pre_args.config:
+        cfg = load_yaml_config(pre_args.config)
+        set_defaults_from_config(parser, cfg, config_mapping)
+
     args = parser.parse_args()
+    if args.dataset is None:
+        raise ValueError("dataset must be provided via --dataset or config file")
+    if args.tokenizer_path is None:
+        raise ValueError("tokenizer_path must be provided via --tokenizer_path or config file")
     main(args)
 
