@@ -2,8 +2,11 @@
 Plot vLLM baseline vs CTA curves from CSVs.
 
 Outputs:
-- vllm_prefill_latency_vs_prompt.png
-- vllm_peak_mem_vs_prompt.png
+- <prefix>_prefill_latency.png
+- <prefix>_e2e_latency.png
+- <prefix>_decode_toks.png
+- <prefix>_peak_mem.png
+- <prefix>_speedup.png
 """
 
 from __future__ import annotations
@@ -33,6 +36,69 @@ def _xy(
     return xs, ys
 
 
+def _plot_metric(
+    *,
+    base: Dict[int, Dict[str, str]],
+    cta: Dict[int, Dict[str, str]],
+    key: str,
+    ylabel: str,
+    out_path: str,
+    transform=None,
+) -> None:
+    fig, ax = plt.subplots(1, 1, figsize=(6, 4))
+    xs, ys = _xy(base, key)
+    if transform is not None:
+        ys = [transform(y) for y in ys]
+    ax.plot(xs, ys, marker="o", label="baseline")
+    xs, ys = _xy(cta, key)
+    if transform is not None:
+        ys = [transform(y) for y in ys]
+    ax.plot(xs, ys, marker="o", label="cta")
+    ax.set_xlabel("Prompt length")
+    ax.set_ylabel(ylabel)
+    ax.set_xscale("log", base=2)
+    ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.6)
+    ax.legend()
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=200)
+    plt.close(fig)
+
+
+def _plot_speedup(
+    *,
+    base: Dict[int, Dict[str, str]],
+    cta: Dict[int, Dict[str, str]],
+    out_path: str,
+) -> None:
+    xs = sorted(set(base.keys()) & set(cta.keys()))
+    prefill = [
+        float(base[x]["prefill_latency_ms_p50"]) / float(cta[x]["prefill_latency_ms_p50"])
+        for x in xs
+    ]
+    e2e = [
+        float(base[x]["latency_ms_p50"]) / float(cta[x]["latency_ms_p50"])
+        for x in xs
+    ]
+    decode = [
+        float(cta[x]["decode_tokens_per_s"]) / float(base[x]["decode_tokens_per_s"])
+        for x in xs
+    ]
+
+    fig, ax = plt.subplots(1, 1, figsize=(6, 4))
+    ax.plot(xs, prefill, marker="o", label="prefill speedup")
+    ax.plot(xs, e2e, marker="o", label="e2e speedup")
+    ax.plot(xs, decode, marker="o", label="decode speedup")
+    ax.axhline(1.0, color="gray", linestyle="--", linewidth=1.0, alpha=0.7)
+    ax.set_xlabel("Prompt length")
+    ax.set_ylabel("Speedup vs baseline (x)")
+    ax.set_xscale("log", base=2)
+    ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.6)
+    ax.legend()
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=200)
+    plt.close(fig)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--baseline", type=str, required=True)
@@ -46,40 +112,51 @@ def main() -> None:
 
     os.makedirs(args.out_dir, exist_ok=True)
 
-    # Prefill latency p50
-    fig, ax = plt.subplots(1, 1, figsize=(6, 4))
-    xs, ys = _xy(base, "prefill_latency_ms_p50")
-    ax.plot(xs, ys, marker="o", label="baseline")
-    xs, ys = _xy(cta, "prefill_latency_ms_p50")
-    ax.plot(xs, ys, marker="o", label="cta")
-    ax.set_xlabel("Prompt length")
-    ax.set_ylabel("Prefill latency p50 (ms)")
-    ax.set_xscale("log", base=2)
-    ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.6)
-    ax.legend()
     out_latency = os.path.join(args.out_dir, f"{args.out_prefix}_prefill_latency.png")
-    plt.tight_layout()
-    plt.savefig(out_latency, dpi=200)
-    plt.close(fig)
+    _plot_metric(
+        base=base,
+        cta=cta,
+        key="prefill_latency_ms_p50",
+        ylabel="Prefill latency p50 (ms)",
+        out_path=out_latency,
+    )
 
-    # Peak mem p95 (GiB)
-    fig, ax = plt.subplots(1, 1, figsize=(6, 4))
-    xs, ys = _xy(base, "peak_mem_bytes_p95")
-    ax.plot(xs, [y / (1024**3) for y in ys], marker="o", label="baseline")
-    xs, ys = _xy(cta, "peak_mem_bytes_p95")
-    ax.plot(xs, [y / (1024**3) for y in ys], marker="o", label="cta")
-    ax.set_xlabel("Prompt length")
-    ax.set_ylabel("Peak mem p95 (GiB)")
-    ax.set_xscale("log", base=2)
-    ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.6)
-    ax.legend()
+    out_e2e = os.path.join(args.out_dir, f"{args.out_prefix}_e2e_latency.png")
+    _plot_metric(
+        base=base,
+        cta=cta,
+        key="latency_ms_p50",
+        ylabel="End-to-end latency p50 (ms)",
+        out_path=out_e2e,
+    )
+
+    out_decode = os.path.join(args.out_dir, f"{args.out_prefix}_decode_toks.png")
+    _plot_metric(
+        base=base,
+        cta=cta,
+        key="decode_tokens_per_s",
+        ylabel="Decode throughput (tokens/s)",
+        out_path=out_decode,
+    )
+
     out_mem = os.path.join(args.out_dir, f"{args.out_prefix}_peak_mem.png")
-    plt.tight_layout()
-    plt.savefig(out_mem, dpi=200)
-    plt.close(fig)
+    _plot_metric(
+        base=base,
+        cta=cta,
+        key="peak_mem_bytes_p95",
+        ylabel="Peak mem p95 (GiB)",
+        out_path=out_mem,
+        transform=lambda y: y / (1024**3),
+    )
+
+    out_speedup = os.path.join(args.out_dir, f"{args.out_prefix}_speedup.png")
+    _plot_speedup(base=base, cta=cta, out_path=out_speedup)
 
     print(f"[plot_vllm_bench] Wrote {out_latency}")
+    print(f"[plot_vllm_bench] Wrote {out_e2e}")
+    print(f"[plot_vllm_bench] Wrote {out_decode}")
     print(f"[plot_vllm_bench] Wrote {out_mem}")
+    print(f"[plot_vllm_bench] Wrote {out_speedup}")
 
 
 if __name__ == "__main__":

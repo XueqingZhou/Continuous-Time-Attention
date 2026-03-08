@@ -22,6 +22,7 @@ python serving/vllm/bench/bench_vllm.py \
 ## 本仓库本地模型（tinyllama）
 本 repo 已提供一个本地 HF 格式小模型：
 - `local_models/tinyllama/`
+- tokenizer 位于 `src/tokenizer/bert-base-uncased/`，运行时建议显式传入 `--tokenizer`
 
 用本地模型跑 baseline（推荐显式设置 `PYTHONPATH`，以便后续 CTA 一键复现）：
 
@@ -30,6 +31,7 @@ export PYTHONPATH=/path/to/Continuous-Time-Attention/src:/path/to/Continuous-Tim
 
 python serving/vllm/bench/bench_vllm.py \
   --model /path/to/Continuous-Time-Attention/local_models/tinyllama \
+  --tokenizer /path/to/Continuous-Time-Attention/src/tokenizer/bert-base-uncased \
   --dtype float16 \
   --prompt-lens 128 512 1024 1536 \
   --max-new-tokens 64 \
@@ -56,6 +58,7 @@ export VLLM_CTA_TRACE=1
 
 python serving/vllm/bench/bench_vllm.py \
   --model /path/to/Continuous-Time-Attention/local_models/tinyllama \
+  --tokenizer /path/to/Continuous-Time-Attention/src/tokenizer/bert-base-uncased \
   --dtype float16 \
   --prompt-lens 128 512 1024 1536 \
   --max-new-tokens 64 \
@@ -82,6 +85,13 @@ python serving/vllm/bench/plot_vllm_bench.py \
   --out-dir assets/images \
   --out-prefix vllm_cta
 ```
+
+输出图：
+- `assets/images/vllm_cta_prefill_latency.png`
+- `assets/images/vllm_cta_e2e_latency.png`
+- `assets/images/vllm_cta_decode_toks.png`
+- `assets/images/vllm_cta_peak_mem.png`
+- `assets/images/vllm_cta_speedup.png`
 
 ## Profiler trace
 ```bash

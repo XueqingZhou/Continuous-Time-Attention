@@ -132,6 +132,11 @@ def main() -> None:
     # Access the tokenizer from the LLM instance
     # vLLM's tokenizer is a wrapper; use _tokenizer for the underlying transformers tokenizer
     tokenizer = getattr(llm.llm_engine.tokenizer, "_tokenizer", llm.llm_engine.tokenizer)
+    max_model_len = getattr(llm.llm_engine.model_config, "max_model_len", None)
+    if isinstance(max_model_len, int):
+        for tok in (llm.llm_engine.tokenizer, tokenizer):
+            if hasattr(tok, "model_max_length"):
+                tok.model_max_length = max_model_len
     
     # Generate prompt with exact token count (prompt_len now means token count)
     prompt = _generate_prompt_with_token_count(tokenizer, args.prompt_len)

@@ -11,16 +11,16 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
 MODEL_PATH="${1:-$ROOT_DIR/local_models/tinyllama}"
+TOKENIZER_PATH="${TOKENIZER_PATH:-$ROOT_DIR/src/tokenizer/bert-base-uncased}"
 OUT_DIR="$ROOT_DIR/results/serving/vllm"
 IMG_DIR="$ROOT_DIR/assets/images"
 
 export PYTHONPATH="$ROOT_DIR/src:$ROOT_DIR:${PYTHONPATH:-}"
 
-# PROMPT_LENS are now token counts (not character counts)
-# Note: prompt_len + max_new_tokens must not exceed model's max_model_len
-# For tinyllama with max_model_len=2048 and max_new_tokens=64, max prompt_len should be ~1984
-# Using ranges that work with the model constraints
-PROMPT_LENS=(512 1024 1536)
+# PROMPT_LENS are token counts (not character counts).
+# For the repo-local tinyllama (max_model_len=2048), keep prompt_len + max_new_tokens
+# below the model limit. Use a denser sweep to make trend plots more informative.
+PROMPT_LENS=(128 256 512 768 1024 1280 1536 1792)
 DTYPE="float16"
 MAX_NEW_TOKENS=64
 PREFILL_TOKENS=1
@@ -28,6 +28,7 @@ ITERS=5
 WARMUP=2
 
 echo "[run_all] model=$MODEL_PATH"
+echo "[run_all] tokenizer=$TOKENIZER_PATH"
 echo "[run_all] out_dir=$OUT_DIR img_dir=$IMG_DIR"
 
 echo "[run_all] baseline bench..."
@@ -38,6 +39,7 @@ unset VLLM_CTA_ENABLE VLLM_CTA_STEPS VLLM_CTA_ALPHA VLLM_CTA_LAYOUT \
 
 python "$ROOT_DIR/serving/vllm/bench/bench_vllm.py" \
   --model "$MODEL_PATH" \
+  --tokenizer "$TOKENIZER_PATH" \
   --dtype "$DTYPE" \
   --prompt-lens "${PROMPT_LENS[@]}" \
   --max-new-tokens "$MAX_NEW_TOKENS" \
@@ -62,6 +64,7 @@ export VLLM_CTA_TRACE=1
 
 python "$ROOT_DIR/serving/vllm/bench/bench_vllm.py" \
   --model "$MODEL_PATH" \
+  --tokenizer "$TOKENIZER_PATH" \
   --dtype "$DTYPE" \
   --prompt-lens "${PROMPT_LENS[@]}" \
   --max-new-tokens "$MAX_NEW_TOKENS" \
@@ -84,12 +87,12 @@ python "$ROOT_DIR/serving/vllm/bench/plot_vllm_bench.py" \
   --out-prefix vllm_cta
 
 echo "[run_all] traces (prefill-like)..."
-# Use larger prompt_len (token count) for profiling to see CTA impact more clearly
-# But keep it within model's max_model_len (2048 for tinyllama) - max_new_tokens
-TRACE_PROMPT_LEN=1536
+# Use a long prompt that still fits tinyllama's max_model_len.
+TRACE_PROMPT_LEN=1792
 unset VLLM_CTA_ENABLE || true
 python "$ROOT_DIR/serving/vllm/bench/profile_vllm.py" \
   --model "$MODEL_PATH" \
+  --tokenizer "$TOKENIZER_PATH" \
   --dtype "$DTYPE" \
   --prompt-len "$TRACE_PROMPT_LEN" \
   --max-new-tokens 1 \
@@ -100,6 +103,7 @@ python "$ROOT_DIR/serving/vllm/bench/profile_vllm.py" \
 export VLLM_CTA_ENABLE=1
 python "$ROOT_DIR/serving/vllm/bench/profile_vllm.py" \
   --model "$MODEL_PATH" \
+  --tokenizer "$TOKENIZER_PATH" \
   --dtype "$DTYPE" \
   --prompt-len "$TRACE_PROMPT_LEN" \
   --max-new-tokens 1 \

@@ -4,15 +4,23 @@
 [![arXiv](https://img.shields.io/badge/arXiv-2505.20666-b31b1b.svg)](https://arxiv.org/abs/2505.20666)
 [![Paper](https://img.shields.io/badge/Paper-PDF-red.svg)](https://aclanthology.org/2025.emnlp-main.1097.pdf)
 
-Official PyTorch implementation of **Continuous-Time Attention**, a PDE-guided formulation of self-attention that treats token interactions as trajectories of a continuous-time dynamical system governed by partial differential equations.
+Official PyTorch implementation of **Continuous-Time Attention (CTA)**, a PDE-guided formulation of self-attention that treats token interactions as trajectories of a continuous-time dynamical system.
 
 ## Portfolio Snapshot (Algorithm → Kernel → Serving)
 
-This repo is intentionally maintained as an **algorithm-to-systems portfolio**: take a mathematically grounded token-mixing operator (PDE/stencil), implement it as a **fused Triton kernel**, and integrate it into a **vLLM serving stack** with end-to-end evidence.
+This repo is intentionally maintained as an **algorithm-to-systems portfolio**. The goal is not just to present a PDE-based token-mixing idea, but to show the full path from:
 
-- **Kernel (Triton fusion)**: multi-step fused diffusion stencil to reduce **HBM roundtrips** and **kernel launch overhead**.
-- **Serving (vLLM integration)**: prefill/decode integration + scheduler/memory/telemetry knobs for controllable long-context serving.
-- **Evidence-first**: scaling curves (latency/memory), profiler traces, and reproducible scripts.
+- a **continuous-time modeling hypothesis** for token interaction,
+- to a **kernel-friendly stencil operator** with fused Triton implementations,
+- to a **serving prototype in vLLM** with runtime controls, profiler traces, and reproducible evidence.
+
+In practice, the repo highlights three complementary layers:
+
+- **Algorithm**: PDE refinement layers for long-sequence Transformer modeling.
+- **Kernel**: fused multi-step diffusion stencils to reduce **HBM roundtrips** and **kernel launch overhead**.
+- **Serving**: a **prefill-oriented vLLM integration** with gating, budget policies, memory reuse, and trace hooks.
+
+The emphasis throughout is **evidence-first**: scaling curves, stage-level attribution, benchmark tables, and scripts that reproduce the claims.
 
 ### Reproduce (GPU)
 
@@ -45,12 +53,30 @@ bash serving/vllm/bench/run_all.sh
 
 ```mermaid
 flowchart LR
-  PromptTokens --> PrefillAttention
-  PrefillAttention -->|"post-attn mixing (CTA)"| CtaMixing
-  CtaMixing -->|"Triton fused stencil"| FusedKernel
+  classDef io fill:#f5f3ff,stroke:#7c3aed,color:#2e1065,stroke-width:1.5px;
+  classDef stage fill:#eef2ff,stroke:#4f46e5,color:#1e1b4b,stroke-width:1.5px;
+  classDef cta fill:#ecfeff,stroke:#0891b2,color:#083344,stroke-width:1.5px;
+  classDef kernel fill:#ecfdf5,stroke:#059669,color:#052e16,stroke-width:1.5px;
+  classDef obs fill:#fff7ed,stroke:#ea580c,color:#7c2d12,stroke-width:1.5px;
+
+  PromptTokens([Prompt Tokens]) --> PrefillAttention[Prefill Attention]
+  PrefillAttention --> PackedStates[Packed Hidden States<br/>BLD layout + attn metadata]
+  PackedStates --> PrefillGate{{Prefill-only gate<br/>length threshold}}
+  PrefillGate -->|apply CTA| CtaMixer[CTA Post-Attn Mixer]
+  PrefillGate -->|skip CTA| HiddenStates[Hidden States]
+  CtaMixer --> StepsPolicy[Runtime budget<br/>fixed / linear / log2 steps]
+  StepsPolicy --> FusedKernel[Triton Fused Stencil<br/>steps = 2 / 4 / 8]
   FusedKernel --> HiddenStates
-  HiddenStates --> Decode
-  Decode --> OutputTokens
+  HiddenStates --> Decode[Decode]
+  Decode --> OutputTokens([Output Tokens])
+  CtaMixer -. trace .-> Telemetry[[Profiler / Telemetry]]
+  FusedKernel -. trace .-> Telemetry
+
+  class PromptTokens,OutputTokens io;
+  class PrefillAttention,PackedStates,HiddenStates,Decode stage;
+  class PrefillGate,CtaMixer,StepsPolicy cta;
+  class FusedKernel kernel;
+  class Telemetry obs;
 ```
 
 ## Done Criteria (Engineering Deliverables)
@@ -65,12 +91,14 @@ flowchart LR
 
 ## System Pitch (Inference/Serving)
 
-From a systems perspective, **Continuous-Time Attention (CTA)** can be viewed as a **local stencil token-mixing operator** (e.g., diffusion Laplacian) that refines token features across a pseudo-time axis. Each PDE refinement step is **\(O(L)\)** in sequence length and is **kernel-friendly** (regular memory access, fusable multi-step updates), making it a natural building block for **long-context prefill** pipelines.
+From a systems perspective, **CTA** is best viewed as a **local stencil token-mixing operator** rather than only as a modeling idea. In the diffusion case, each refinement step is **\(O(L)\)** in sequence length, has regular memory access, and admits **multi-step fusion**, which makes it attractive as a controllable operator for **long-context prefill** studies.
 
 This repo provides:
 
 - **Research baseline**: PDE refinement layers integrated into Transformer blocks (`src/models/transformers.py`).
-- **Systems evidence (this branch of work)**: microbenchmarks, profiling, and a Triton kernel stub to quantify/optimize **latency & memory scaling** for long sequences.
+- **Kernel path**: Triton implementations for forward/backward diffusion and fused multi-step execution (`kernels/diffusion_triton.py`).
+- **Serving path**: a vLLM post-attention mixer prototype with packed-prefill handling, runtime gating, and profiling hooks (`src/cta/serving_vllm.py`).
+- **Systems evidence**: microbenchmarks, profiler traces, and baseline-vs-CTA serving comparisons to quantify **latency, memory, and attribution**.
 
 ## System Efficiency (Prefill)
 
@@ -148,15 +176,18 @@ Quick takeaways from the same setup as above (`mode=block, L=4096`):
 
 ## Serving Integration Roadmap
 
-Target: long-context **prefill** acceleration and controllable token mixing in serving stacks.
+Target: make CTA a **controllable prefill operator** for long-context serving: integrate it into a real serving stack, bound its incremental cost, and expose enough knobs/telemetry to study where the overhead comes from.
 
-- **Prefill-only integration**: apply PDE refinement after attention for long prompts; keep decode path unchanged.
-- **Custom op route**: implement fused multi-step stencil as a custom op (Triton/CUDA) and call from PyTorch.
-- **vLLM integration idea**: place PDE refinement as an optional post-attention mixing module inside the attention block (prefill path), with a kernel specialized for contiguous `[B, D, L]` layouts.
+- **Prefill-only integration**: apply CTA after attention for long prompts while keeping the decode path unchanged, so the most latency-sensitive token-by-token path stays clean.
+- **Budget-aware runtime policy**: gate CTA by sequence length and map prompt length to a step budget (`fixed` / `linear` / `log2`) instead of treating PDE steps as a static research hyperparameter.
+- **Custom-op route**: implement the multi-step stencil as a Triton/CUDA op so the added operator is kernel-friendly and launch-efficient.
+- **vLLM integration path**: place CTA as an optional post-attention mixer inside the attention block, support packed prefill via `attn_metadata`, and keep profiler-visible stage boundaries for attribution.
 
 ## Serving Evidence (vLLM)
 
-Use the vLLM bench harness to produce baseline and CTA runs, then compare and plot:
+The vLLM harness is meant to answer a systems question, not just produce a single speedup number: if CTA is inserted as a **prefill-only post-attention mixer**, how much latency / memory does it add, where does that cost come from, and under which prompt lengths is the tradeoff reasonable?
+
+Use the harness to produce paired baseline/CTA runs, then compare and plot:
 
 ```bash
 # One-command end-to-end (repo-local tinyllama by default):
@@ -178,40 +209,47 @@ Key artifacts:
 - `results/serving/vllm/trace_vllm_baseline_prefill_tinyllama.json`
 - `results/serving/vllm/trace_vllm_cta_prefill_tinyllama.json`
 
+Read these artifacts as **evidence of integration feasibility and cost attribution**:
+- prefill latency: approximate overhead of enabling CTA on long prompts
+- decode tokens/s: sanity check that the decode path remains largely unaffected
+- peak mem: rough serving footprint rather than activation-only memory
+- trace files: stage-level attribution for attention vs CTA vs layout/packing
+
 ## Docs (Systems-Focused Notes)
 - `docs/math_to_kernel.md`
 - `docs/kernel_fusion_notes.md`
 - `docs/vllm_serving_notes.md`
 
-## 🌟 Overview
+## Research Snapshot (Paper-Reported Results)
 
-Continuous-Time Attention addresses the challenges of long-sequence modeling in Transformers by:
+The following training results summarize the paper-reported modeling outcomes. In this repo, the most complete checked-in evidence is the **systems path** above (kernel benchmarks, profiling, and vLLM serving artifacts). Training artifacts are not versioned by default and should be regenerated with the experiment scripts below if needed.
 
-- 🔄 **PDE-Guided Dynamics**: Models token interactions as solutions of partial differential equations (PDEs) in continuous time
-- 📈 **Improved Stability**: Better gradient flow and training stability for long-range dependencies  
-- ⚡ **Efficient Computation**: Favorable computational properties for long sequences
-- 🎯 **Strong Performance**: Consistent improvements across classification and language modeling tasks
+At a high level, the paper studies CTA as:
 
-## 📊 Key Results
+- a **PDE-guided token interaction mechanism** in continuous time,
+- a family of **refinement operators** (diffusion / wave / reaction-diffusion / advection-diffusion),
+- and a modeling change evaluated on classification and language-modeling settings.
 
-| **Task** | **Standard Transformer** | **PDE-Transformer** | **Improvement** |
-|----------|-------------------------|---------------------|----------------|
+## Paper-Reported Task Results
+
+| **Task** | **Standard Transformer** | **PDE-Transformer** | **Absolute Delta** |
+|----------|-------------------------|---------------------|--------------------|
 | IMDb | 59.4% | **62.4%** | +3.0% |
 | AG News | 60.5% | **72.1%** | +11.6% |
 | SST-2 | 56.6% | **76.3%** | +19.7% |
-| IMDb (Char-level, LRA) | 64.68% | **65.44%** | +1.17% |
+| IMDb (Char-level, LRA) | 64.68% | **65.44%** | +0.76% |
 
-For WikiText-103 language modeling, PDE-Transformer achieves perplexity of **1.02** compared to Standard Longformer's **1.04** 
+For WikiText-103 language modeling, the paper-reported best validation perplexity is **1.02** for PDE-Transformer compared to **1.04** for the Standard Transformer baseline.
 
-### Ablation Study Results
+### Paper-Reported Ablation Snapshot
 
-**Table: PDE Steps** - Optimal configuration uses **4 PDE steps**:
-- 1 step: PPL = 3.49 (99.97% reduction)
-- 2 steps: PPL = 3.42 (99.97% reduction)  
-- **4 steps: PPL = 3.36** (99.97% reduction) ✓ **Best**
-- 8 steps: Training becomes unstable
+**PDE steps**: in the reported WikiText-103 ablation, **4 PDE steps** gave the best perplexity among the tested stable settings:
+- 1 step: PPL = 3.49
+- 2 steps: PPL = 3.42
+- **4 steps: PPL = 3.36** ✓ **Best**
+- 8 steps: training became unstable
 
-**Table: PDE Types** - All PDE variants achieve ~99.98% improvement:
+**PDE types**: in the reported ablation, diffusion and reaction-diffusion gave the lowest perplexity among the tested variants:
 - Diffusion (α=0.10): PPL = 2.15
 - Wave (α=0.15): PPL = 2.27
 - Reaction-Diffusion (α=0.10, β=0.02): PPL = 2.15
