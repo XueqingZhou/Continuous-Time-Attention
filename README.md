@@ -187,9 +187,34 @@ Target: make CTA a **controllable prefill operator** for long-context serving: i
 
 ## Serving Evidence (vLLM)
 
-The vLLM harness is meant to answer a systems question, not just produce a single speedup number: if CTA is inserted as a **prefill-only post-attention mixer**, how much latency / memory does it add, where does that cost come from, and under which prompt lengths is the tradeoff reasonable?
+This section evaluates CTA as a **prefill-only post-attention mixer** inside a patched `vLLM 0.13.0` stack. The goal is not to claim a universal speedup, but to answer a more practical systems question:
 
-Use the harness to produce paired baseline/CTA runs, then compare and plot:
+**If CTA is enabled only on the prefill path, how much cost does it add, where does that cost come from, and under which prompt lengths is the tradeoff favorable?**
+
+### Dense Prompt Sweep: Main Takeaways
+
+Using a repo-local TinyLlama setup with prompt lengths `128 -- 1792` and a fixed CTA budget (`steps=4`), we observe:
+
+- **Prefill p50 improves at 6 / 8 prompt lengths**, with the best point at **1024 tokens** (`6.268 ms -> 5.629 ms`, **1.114x**).
+- **End-to-end latency is mildly favorable at several lengths**, but the effect is smaller and less stable than the prefill-only view.
+- **Decode throughput stays close to baseline** (roughly within `0.98x -- 1.04x` in this sweep), which is consistent with the design goal of keeping CTA on the prefill path only.
+- **Peak memory barely moves in this benchmark setup**, mainly because vLLM pre-allocates serving memory aggressively; this should be read as a rough serving footprint signal rather than activation-only memory.
+
+### Dense Sweep Plots
+
+**Prefill latency vs prompt length**
+
+![vLLM CTA dense prefill latency](assets/images/vllm_cta_dense_prefill_latency.png)
+
+**Speedup summary**
+
+![vLLM CTA dense speedup](assets/images/vllm_cta_dense_speedup.png)
+
+**Decode throughput**
+
+![vLLM CTA dense decode throughput](assets/images/vllm_cta_dense_decode_toks.png)
+
+### How to Reproduce
 
 ```bash
 # One-command end-to-end (repo-local tinyllama by default):
@@ -202,20 +227,27 @@ python serving/vllm/bench/plot_vllm_bench.py --help
 python serving/vllm/bench/profile_vllm.py --help
 ```
 
-Key artifacts:
+### Key Artifacts
+
 - `results/serving/vllm/bench_vllm_baseline.csv` / `.json`
 - `results/serving/vllm/bench_vllm_cta.csv` / `.json`
 - `results/serving/vllm/compare_vllm_bench.md` / `.csv`
-- `assets/images/vllm_cta_prefill_latency.png`
-- `assets/images/vllm_cta_peak_mem.png`
+- `results/serving/vllm/compare_vllm_bench_dense.md` / `.csv`
+- `assets/images/vllm_cta_dense_prefill_latency.png`
+- `assets/images/vllm_cta_dense_speedup.png`
+- `assets/images/vllm_cta_dense_decode_toks.png`
+- `assets/images/vllm_cta_dense_e2e_latency.png`
+- `assets/images/vllm_cta_dense_peak_mem.png`
 - `results/serving/vllm/trace_vllm_baseline_prefill_tinyllama.json`
 - `results/serving/vllm/trace_vllm_cta_prefill_tinyllama.json`
 
-Read these artifacts as **evidence of integration feasibility and cost attribution**:
-- prefill latency: approximate overhead of enabling CTA on long prompts
-- decode tokens/s: sanity check that the decode path remains largely unaffected
-- peak mem: rough serving footprint rather than activation-only memory
-- trace files: stage-level attribution for attention vs CTA vs layout/packing
+### How to Read These Results
+
+- **Prefill latency**: approximate cost / benefit of enabling CTA on long prompts.
+- **End-to-end latency**: useful as a serving-facing metric, but less diagnostic than prefill-only numbers.
+- **Decode tokens/s**: sanity check that the decode path remains largely unaffected.
+- **Peak memory**: rough serving footprint, not a precise activation-memory measurement.
+- **Trace files**: stage-level attribution for attention vs CTA vs layout / packing overhead.
 
 ## Docs (Systems-Focused Notes)
 - `docs/math_to_kernel.md`
