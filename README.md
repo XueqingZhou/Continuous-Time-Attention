@@ -52,32 +52,34 @@ bash serving/vllm/bench/run_all.sh
 ## System Diagram (High-Level Dataflow)
 
 ```mermaid
-flowchart LR
-  classDef io fill:#f5f3ff,stroke:#7c3aed,color:#2e1065,stroke-width:1.5px;
-  classDef stage fill:#eef2ff,stroke:#4f46e5,color:#1e1b4b,stroke-width:1.5px;
-  classDef cta fill:#ecfeff,stroke:#0891b2,color:#083344,stroke-width:1.5px;
-  classDef kernel fill:#ecfdf5,stroke:#059669,color:#052e16,stroke-width:1.5px;
-  classDef obs fill:#fff7ed,stroke:#ea580c,color:#7c2d12,stroke-width:1.5px;
+flowchart TB
+  classDef io fill:#f5f3ff,stroke:#7c3aed,color:#2e1065,stroke-width:1.3px;
+  classDef stage fill:#eef2ff,stroke:#4f46e5,color:#1e1b4b,stroke-width:1.3px;
+  classDef cta fill:#ecfeff,stroke:#0891b2,color:#083344,stroke-width:1.3px;
+  classDef kernel fill:#ecfdf5,stroke:#059669,color:#052e16,stroke-width:1.3px;
+  classDef obs fill:#fff7ed,stroke:#ea580c,color:#7c2d12,stroke-width:1.3px;
 
-  PromptTokens([Prompt Tokens]) --> PrefillAttention[Prefill Attention]
-  PrefillAttention --> PackedStates[Packed Hidden States<br/>BLD layout + attn metadata]
-  PackedStates --> PrefillGate{{Prefill-only gate<br/>length threshold}}
-  PrefillGate -->|apply CTA| CtaMixer[CTA Post-Attn Mixer]
-  PrefillGate -->|skip CTA| HiddenStates[Hidden States]
-  CtaMixer --> StepsPolicy[Runtime budget<br/>fixed / linear / log2 steps]
-  StepsPolicy --> FusedKernel[Triton Fused Stencil<br/>steps = 2 / 4 / 8]
-  FusedKernel --> HiddenStates
-  HiddenStates --> Decode[Decode]
-  Decode --> OutputTokens([Output Tokens])
-  CtaMixer -. trace .-> Telemetry[[Profiler / Telemetry]]
-  FusedKernel -. trace .-> Telemetry
+  A([Prompt]) --> B[Prefill Attention]
+  B --> C{CTA Gate}
+  C -->|on| D[CTA Mixer]
+  D --> E[Triton Fused Kernel]
+  C -->|off| F[Hidden States]
+  E --> F
+  F --> G[Decode]
+  G --> H([Output])
 
-  class PromptTokens,OutputTokens io;
-  class PrefillAttention,PackedStates,HiddenStates,Decode stage;
-  class PrefillGate,CtaMixer,StepsPolicy cta;
-  class FusedKernel kernel;
-  class Telemetry obs;
+  C -. policy .-> P[[Length Threshold<br/>Step Policy]]
+  D -. trace .-> T[[Profiler / Telemetry]]
+  E -. trace .-> T
+
+  class A,H io;
+  class B,F,G stage;
+  class C,D cta;
+  class E kernel;
+  class P,T obs;
 ```
+
+CTA is applied as a **prefill-only post-attention operator**. In the current prototype, runtime policy controls **when** CTA is enabled, while the fused kernel and profiler hooks expose **how much** cost it adds and **where** that cost comes from.
 
 ## Done Criteria (Engineering Deliverables)
 
