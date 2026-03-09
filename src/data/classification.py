@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Tuple
 import torch
 from torch.utils.data import Dataset
 from datasets import load_dataset
-from transformers import BertTokenizer
+from transformers import AutoTokenizer
 
 
 class ClassificationDataset(Dataset):
@@ -48,7 +48,7 @@ def prepare_classification_data(
         vocab_size: Vocabulary size
     """
     # Load tokenizer
-    tokenizer = BertTokenizer.from_pretrained(tokenizer_path)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
     
     # Load dataset
     if dataset_name == 'imdb':

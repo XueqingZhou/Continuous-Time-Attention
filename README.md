@@ -325,14 +325,21 @@ cd src
 
 ### Download Tokenizer
 
-You'll need to download a pre-trained tokenizer (e.g., BERT tokenizer):
+Experiment scripts accept a `--tokenizer_path` argument.  You can point it at
+any local directory or a HuggingFace Hub model name (e.g. `bert-base-uncased`).
+
+To cache a tokenizer locally for offline use:
 
 ```python
-from transformers import BertTokenizer
+from transformers import AutoTokenizer
 
-tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-tokenizer.save_pretrained('./tokenizer/bert-base-uncased')
+tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+tokenizer.save_pretrained("./tokenizer/bert-base-uncased")
 ```
+
+Then pass `--tokenizer_path ./tokenizer/bert-base-uncased` to the experiment
+scripts, or simply use `--tokenizer_path bert-base-uncased` (downloads on
+first use).
 
 ### Run Experiments
 
@@ -482,7 +489,7 @@ src/
 │   ├── char_level_imdb.yaml
 │   └── wikitext103.yaml
 ├── scripts/
-│   ├── prepare_tokenizer.sh
+│   ├── run_sanity_checks.py       # Lightweight pipeline & causality checks
 │   ├── run_all_experiments.sh
 │   └── run_all_ablations.sh       # Run all ablation studies
 ├── requirements.txt

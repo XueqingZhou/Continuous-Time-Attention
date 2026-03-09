@@ -72,7 +72,11 @@ def run_profile(
 
     # Build workload
     if mode == "pde_only":
-        x = torch.randn(batch_size, hidden_size, seq_len, device=device, dtype=dtype)
+        # Match input shape to the chosen layout.
+        if pde_layout == "bdl":
+            x = torch.randn(batch_size, hidden_size, seq_len, device=device, dtype=dtype)
+        else:
+            x = torch.randn(batch_size, seq_len, hidden_size, device=device, dtype=dtype)
         pde_layers = [create_pde_layer(pde_type, hidden_size, layout=pde_layout).to(device) for _ in range(pde_steps)]
         for l in pde_layers:
             l.eval()

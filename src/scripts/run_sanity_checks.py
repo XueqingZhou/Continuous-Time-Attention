@@ -2,17 +2,36 @@
 
 from __future__ import annotations
 
+import argparse
 from typing import Tuple
 
 import os
 import sys
+from pathlib import Path
 
 import torch
+from transformers import AutoTokenizer
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from data.language_modeling import prepare_lm_data
+from data.language_modeling import _ensure_pad_token, _group_texts, _tokenize_texts
 from models import PDETransformerLM, StandardTransformerLM
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_TOKENIZER_PATH = REPO_ROOT / "src" / "tokenizer" / "bert-base-uncased"
+HUB_FALLBACK_TOKENIZER = "bert-base-uncased"
+
+
+def _resolve_tokenizer_path(path: str) -> str:
+    """Return *path* if it exists locally, otherwise fall back to the HF Hub."""
+    if Path(path).is_dir():
+        return path
+    print(
+        f"[sanity] Local tokenizer not found at {path}; "
+        f"falling back to '{HUB_FALLBACK_TOKENIZER}' from HuggingFace Hub."
+    )
+    return HUB_FALLBACK_TOKENIZER
 
 
 def _seed_all(seed: int) -> None:
@@ -56,21 +75,26 @@ def check_causal_invariance() -> Tuple[bool, str]:
 
 
 def check_block_dataset(tokenizer_path: str) -> Tuple[bool, str]:
-    """Check LM block dataset shape and padding-free attention mask."""
-    os.environ.setdefault("HF_HUB_OFFLINE", "1")
-    train_ds, _, _ = prepare_lm_data(
-        tokenizer_path=tokenizer_path,
-        max_length=32,
-        block_size=32,
-        train_sample_size=2,
-        val_sample_size=2,
-        add_eos=True,
-    )
-    sample = train_ds[0]
-    input_ids = sample["input_ids"]
-    attn = sample["attention_mask"]
-    ok = input_ids.shape[0] == 32 and attn.sum().item() == 32
-    msg = f"block_dataset len={input_ids.shape[0]} attn_sum={int(attn.sum().item())}"
+    """Check tokenizer + block grouping logic without remote dataset access."""
+    tokenizer_path = _resolve_tokenizer_path(tokenizer_path)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, use_fast=True)
+    _ensure_pad_token(tokenizer)
+
+    examples = {
+        "text": [
+            "continuous time attention " * 24,
+            "diffusion refinement improves long-context modeling " * 16,
+        ]
+    }
+    tokenized = _tokenize_texts(examples, tokenizer=tokenizer, add_eos=True)
+    grouped = _group_texts(tokenized, block_size=32)
+    if not grouped["input_ids"]:
+        return False, "block_dataset produced no blocks"
+
+    input_ids = grouped["input_ids"][0]
+    attn = grouped["attention_mask"][0]
+    ok = len(input_ids) == 32 and sum(attn) == 32
+    msg = f"block_dataset len={len(input_ids)} attn_sum={int(sum(attn))}"
     return ok, msg
 
 
@@ -117,7 +141,16 @@ def check_seed_stability() -> Tuple[bool, str]:
 
 
 def main() -> None:
-    tokenizer_path = "./local_models/tinyllama"
+    parser = argparse.ArgumentParser(description="Run lightweight CTA sanity checks")
+    parser.add_argument(
+        "--tokenizer_path",
+        type=str,
+        default=str(DEFAULT_TOKENIZER_PATH),
+        help="Path to a local tokenizer directory. Falls back to HuggingFace Hub.",
+    )
+    args = parser.parse_args()
+
+    tokenizer_path = args.tokenizer_path
     checks = [
         ("causal_invariance", check_causal_invariance),
         ("block_dataset", lambda: check_block_dataset(tokenizer_path)),

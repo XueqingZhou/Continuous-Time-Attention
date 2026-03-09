@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import math
-
 import pytest
 import torch
 
@@ -10,7 +8,6 @@ from models.pde_layers import DiffusionPDELayer
 
 
 def _assert_close(a: torch.Tensor, b: torch.Tensor) -> None:
-    # BF16/fp16 can have larger error; reference uses fp32 accumulate though.
     if a.dtype in (torch.float16, torch.bfloat16) or b.dtype in (
         torch.float16,
         torch.bfloat16,
@@ -19,6 +16,26 @@ def _assert_close(a: torch.Tensor, b: torch.Tensor) -> None:
     else:
         torch.testing.assert_close(a, b, rtol=1e-5, atol=1e-5)
 
+
+def _causal_diffusion_step_reference(
+    x: torch.Tensor, *, alpha: float, layout: str
+) -> torch.Tensor:
+    """Hand-rolled causal diffusion reference (backward-difference stencil)."""
+    x_fp32 = x.to(dtype=torch.float32)
+    if layout == "bdl":
+        if x_fp32.size(2) < 3:
+            return x
+        lap = x_fp32[:, :, 2:] - 2.0 * x_fp32[:, :, 1:-1] + x_fp32[:, :, :-2]
+        y = torch.cat([x_fp32[:, :, :2], x_fp32[:, :, 2:] + alpha * lap], dim=2)
+    else:
+        if x_fp32.size(1) < 3:
+            return x
+        lap = x_fp32[:, 2:, :] - 2.0 * x_fp32[:, 1:-1, :] + x_fp32[:, :-2, :]
+        y = torch.cat([x_fp32[:, :2, :], x_fp32[:, 2:, :] + alpha * lap], dim=1)
+    return y.to(dtype=x.dtype)
+
+
+# ---- boundary / shape tests ------------------------------------------------
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
 @pytest.mark.parametrize("l", [1, 2, 3, 4, 5, 17])
@@ -50,6 +67,8 @@ def test_diffusion_steps_reference_shape_dtype(dtype: torch.dtype, steps: int) -
     assert y.dtype == x.dtype
 
 
+# ---- layer vs. reference correctness ---------------------------------------
+
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
 @pytest.mark.parametrize("steps", [1, 2, 4, 8])
 @pytest.mark.parametrize("alpha", [0.0, 0.03, 0.1])
@@ -61,7 +80,6 @@ def test_diffusion_layer_matches_reference(
     x = torch.randn(b, d, l, dtype=dtype)
 
     layer = DiffusionPDELayer(hidden_size=d, alpha_init=float(alpha))
-    # Explicitly set alpha to avoid any parameter dtype surprises.
     layer.alpha.data.fill_(float(alpha))
 
     y = x
@@ -71,6 +89,26 @@ def test_diffusion_layer_matches_reference(
     y_ref = diffusion_steps_reference(x, alpha=float(alpha), steps=steps)
     _assert_close(y, y_ref)
 
+
+@pytest.mark.parametrize("layout", ["bdl", "bld"])
+def test_causal_diffusion_layer_matches_reference(layout: str) -> None:
+    torch.manual_seed(0)
+    alpha = 0.1
+
+    if layout == "bdl":
+        x = torch.randn(2, 4, 23, dtype=torch.float32)
+    else:
+        x = torch.randn(2, 23, 4, dtype=torch.float32)
+
+    layer = DiffusionPDELayer(hidden_size=4, alpha_init=alpha, layout=layout, causal=True)
+    layer.alpha.data.fill_(alpha)
+
+    y = layer(x)
+    y_ref = _causal_diffusion_step_reference(x, alpha=alpha, layout=layout)
+    _assert_close(y, y_ref)
+
+
+# ---- error handling ---------------------------------------------------------
 
 def test_diffusion_reference_invalid_ndim() -> None:
     x = torch.randn(2, 3)
@@ -83,6 +121,8 @@ def test_diffusion_reference_invalid_steps() -> None:
     with pytest.raises(ValueError):
         _ = diffusion_steps_reference(x, alpha=0.1, steps=-1)
 
+
+# ---- BLD layout vs. BDL reference ------------------------------------------
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
 @pytest.mark.parametrize("steps", [1, 2, 4, 8])
@@ -97,8 +137,6 @@ def test_diffusion_layer_layout_bld_matches_reference(steps: int) -> None:
     y_ref = diffusion_steps_reference(x_bdl, alpha=alpha, steps=steps)
     y_ref_bld = y_ref.transpose(1, 2)
 
-    from models.pde_layers import DiffusionPDELayer  # noqa: WPS433
-
     layer = DiffusionPDELayer(hidden_size=d, alpha_init=alpha, layout="bld").to(x_bld.device)
     layer.alpha.data.fill_(alpha)
 
@@ -107,4 +145,3 @@ def test_diffusion_layer_layout_bld_matches_reference(steps: int) -> None:
         y = layer(y)
 
     _assert_close(y, y_ref_bld)
-

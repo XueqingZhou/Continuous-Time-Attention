@@ -10,23 +10,26 @@ import torch.nn as nn
 from .pde_layers import create_pde_layer
 
 
-def generate_causal_mask(seq_len, device):
-    """
-    Generate a causal (lower triangular) mask for self-attention.
-    
+def generate_causal_mask(seq_len: int, device: torch.device) -> torch.Tensor:
+    """Generate a causal (lower triangular) additive mask for self-attention.
+
+    Uses ``-inf`` for masked positions so that the mask works consistently
+    across all PyTorch versions (some interpret bool masks differently).
+
     Args:
-        seq_len (int): Sequence length
-        device: Device to create mask on
-    
+        seq_len: Sequence length.
+        device: Device to create mask on.
+
     Returns:
-        mask: (seq_len, seq_len) tensor where mask[i, j] = True if j > i (masked)
-              This means position i can only attend to positions <= i
+        Float mask of shape ``(seq_len, seq_len)`` where ``mask[i, j] = -inf``
+        if ``j > i`` (position *i* cannot attend to future position *j*).
     """
-    # Create lower triangular mask: True = masked (cannot attend)
-    # For causal: position i can attend to j where j <= i
-    # So we mask positions where j > i
-    mask = torch.triu(torch.ones(seq_len, seq_len, device=device, dtype=torch.bool), diagonal=1)
-    return mask
+    return torch.triu(
+        torch.full(
+            (seq_len, seq_len), float("-inf"), device=device, dtype=torch.float32,
+        ),
+        diagonal=1,
+    )
 
 
 class PDETransformerClassifier(nn.Module):
@@ -122,12 +125,12 @@ class PDETransformerClassifier(nn.Module):
             if self.pde_layout == 'bdl':
                 x_t = x.transpose(1, 2).contiguous()
                 for pde_layer in pde_layer_list:
-                    x_t = pde_layer(x_t)
+                    x_t = pde_layer(x_t, attention_mask=attention_mask)
                 x = x_t.transpose(1, 2).contiguous()
             else:
                 # layout = 'bld' → operate directly without transpose
                 for pde_layer in pde_layer_list:
-                    x = pde_layer(x)
+                    x = pde_layer(x, attention_mask=attention_mask)
         
         # Masked mean pooling
         expanded_mask = attention_mask.unsqueeze(-1).expand(x.size())
@@ -292,16 +295,15 @@ class PDETransformerLM(nn.Module):
         x = x + self.pos_encoder[:, :seq_len, :]
         x = self.dropout(x)
         
-        # Create padding mask (True for positions to ignore)
-        padding_mask = (attention_mask == 0)
-        
-        # Create causal mask for autoregressive LM (lower triangular)
-        # mask[i, j] = True if j > i (cannot attend to future)
+        # Additive padding mask: 0 for valid, -inf for padding (matches causal_mask dtype).
+        padding_mask = torch.zeros_like(attention_mask, dtype=torch.float32)
+        padding_mask = padding_mask.masked_fill(attention_mask == 0, float("-inf"))
+
+        # Causal mask: -inf for future positions.
         causal_mask = generate_causal_mask(seq_len, device=x.device)
-        
+
         # Apply Transformer + PDE layers
         for transformer_layer, pde_layer_list in zip(self.transformer_layers, self.pde_layers):
-            # Apply causal mask + padding mask
             x = transformer_layer(x, src_mask=causal_mask, src_key_padding_mask=padding_mask)
 
             # Apply PDE refinement with attention_mask for mask-aware updates
@@ -375,19 +377,16 @@ class StandardTransformerLM(nn.Module):
         x = x + self.pos_encoder[:, :seq_len, :]
         x = self.dropout(x)
         
-        # Create padding mask (True for positions to ignore)
-        padding_mask = (attention_mask == 0)
-        
-        # Create causal mask for autoregressive LM (lower triangular)
-        # mask[i, j] = True if j > i (cannot attend to future)
+        # Additive padding mask: 0 for valid, -inf for padding (matches causal_mask dtype).
+        padding_mask = torch.zeros_like(attention_mask, dtype=torch.float32)
+        padding_mask = padding_mask.masked_fill(attention_mask == 0, float("-inf"))
+
+        # Causal mask: -inf for future positions.
         causal_mask = generate_causal_mask(seq_len, device=x.device)
-        
+
         # Transformer encoder with causal + padding mask
-        # Note: TransformerEncoder doesn't support src_mask directly, so we need to
-        # manually apply the mask to each layer
         for layer in self.transformer.layers:
             x = layer(x, src_mask=causal_mask, src_key_padding_mask=padding_mask)
         
         # Project to vocabulary
         return self.fc(x)
-
